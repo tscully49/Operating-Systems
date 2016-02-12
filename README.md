@@ -13,7 +13,6 @@ Remote Sync:
 Additional Git Resources:
 
 * [Branch and Merge Docs](https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging)
-* [Upstream Git Merge](http://lmgtfy.com/?q=git+merge+upstream)
 
 Don't forget to install the library!
 
