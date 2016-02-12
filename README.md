@@ -14,3 +14,10 @@ Additional Git Resources:
 
 * [Branch and Merge Docs](https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging)
 * [Upstream Git Merge](http://lmgtfy.com/?q=git+merge+upstream)
+
+Don't forget to install the library!
+
+* [OS_Library](https://github.com/mizzoucs/OS_Library)
+* `git clone git@github.com:mizzoucs/OS_Library.git`
+* `cd OS_Library && mkdir build && cd build`
+* `cmake .. && sudo make install && sudo ldconfig`
