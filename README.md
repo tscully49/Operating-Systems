@@ -36,7 +36,12 @@ Tags are neither automagically created nor uploaded to GitHub, so remember to cr
 to create a tag of your current commit, and push it to github with
 
 	git push origin <TAG>
-	
+
+###/!\ WARNING /!\
+
+Be wary of force pushing! Changing your commit history can be dangerous, especially when working in teams. Rewriting history that has already been submitted may cause future submissions to be rejected!
+
+
 ##Updating Your Submission:
 
 If you want to update your tagged version, first delete old tag with
