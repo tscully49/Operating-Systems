@@ -11,7 +11,7 @@ A repo of your very own!
 Check for updates often! These updates will contain future assignments, milestones, example code, and bugfixes. **_Keeping your repository up to date is your responsibility._**
 
 	git fetch upstream
-	git merge upstream
+	git merge upstream/master
 
 ## Additional Git Resources:
 
