@@ -6,6 +6,9 @@
 #include <dyn_array.h>
 #include "../include/processing_scheduling.h"
 
+// The time limit per process using the CPU
+// used for the round robin process scheduling algorithm
+#define QUANTUM 4 
 
 // private function
 void virtual_cpu(ProcessControlBlock_t* process_control_block) {
@@ -42,7 +45,6 @@ bool first_come_first_serve(dyn_array_t* ready_queue, ScheduleResult_t* result) 
 // [1] latency = 24, wallclock = 27
 // [2] latency = 27, wallclock = 30
 
-
-// 6,8,7,3 --> 6 + (6+8) + (6+8+7) 
-//             6  + 14   +   21
-//                20     +   21
+bool round_robin(dyn_array_t* ready_queue, ScheduleResult_t* result) {
+	return true;
+}
