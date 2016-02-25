@@ -6,14 +6,16 @@
 #include <dyn_array.h>
 #include "../include/processing_scheduling.h"
 
-// The time limit per process using the CPU
-// used for the round robin process scheduling algorithm
-#define QUANTUM 4 
+#define QUANTUM 4 // Used for Robin Round for process as the run time limit
+
+//global lock variable
+pthread_mutex_t mutex;
 
 // private function
 void virtual_cpu(ProcessControlBlock_t* process_control_block) {
 	// decrement the burst time of the pcb
 	--process_control_block->remaining_burst_time;
+	sleep(1);
 }
 
 bool first_come_first_serve(dyn_array_t* ready_queue, ScheduleResult_t* result) {
@@ -86,6 +88,7 @@ bool round_robin(dyn_array_t* ready_queue, ScheduleResult_t* result) {
 	free(current); // free memory for the buffer
 	return true;
 }
+
 /*
 wall clock = 0
 [0] wallclock = 4
@@ -95,3 +98,35 @@ wall clock = 0
 // 24, 3, 3 ---> 47
 // 4 ... 3 ... 3 ... 4 ... 4 ... 4 ... 4 ... 4 ...
 */
+
+
+/*
+* MILESTONE 3 GIVEN CODE
+*/
+void destroy_mutex (void) {
+	pthread_mutex_destroy(&mutex);	
+};	
+
+// init the protected mutex
+bool init_lock(void) {
+	if (pthread_mutex_init(&mutex,NULL) != 0) {
+		return false;
+	}
+	atexit(destroy_mutex);
+	return true;
+}
+
+/*
+* MILESTONE 3 CODE
+*/
+dyn_array_t* load_process_control_blocks (const char* input_file ) {
+	
+}
+
+void* first_come_first_serve_worker (void* input) {
+	
+}
+
+void* round_robin_worker (void* input) {
+	
+}
