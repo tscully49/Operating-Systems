@@ -19,7 +19,8 @@ typedef struct {
 // Create and Define worker input struct
 // that is needed for thread worker function below
 typedef struct {
-	
+	ScheduleResult_t *results;
+	dyn_array_t *ready_queue_array;
 } WorkerInput_t;
 
 
@@ -55,4 +56,6 @@ void* round_robin_worker (void* input);
 
 // init the protected mutex
 bool init_lock(void);
+
+void destroy_mutex(void);
 #endif
