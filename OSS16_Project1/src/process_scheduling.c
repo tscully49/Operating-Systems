@@ -65,31 +65,36 @@ bool round_robin(dyn_array_t* ready_queue, ScheduleResult_t* result) {
 	
 	float size_of_array = dyn_array_size(ready_queue); // Find the size of the dynamic array
 	float clocktime = 0, total_latency = 0, total_clock_time = 0;
-	while(!dyn_array_empty(ready_queue)) { // Pull the back of the dynamic array and check that it isn't empty(will return false if the array is empty)
+	while(1) { // Pull the back of the dynamic array and check that it isn't empty(will return false if the array is empty)
 		pthread_mutex_lock(&mutex); // Lock the mutex so the thread can grab from the PCB array
-		dyn_array_extract_back(ready_queue, current);
-		printf("\nGRABBING NEW PROCESS RR: %u\n", current->remaining_burst_time);
-		pthread_mutex_unlock(&mutex); // Unlock mutex so that other threads can use it 
-		if(current->started == 0) {
-			current->started = 1; // flip the started variable in the PCB
-			total_latency += clocktime;
-		}
-		for (size_t i = 0;i<QUANTUM;++i) {
-			printf("\nCPU RR");
-			virtual_cpu(current);
-			clocktime++;
-			if(current->remaining_burst_time == 0) {
-				break; // break from the for loop if the process is done executing before reaching the quantum
-			} 	
-		}
-		// ...since the wall clock will be increased for all processes in the queue that are already running each time a different process executes
-		if(current->remaining_burst_time == 0) {
-			total_clock_time += clocktime;
-			continue;
-		} else {
-			pthread_mutex_lock(&mutex); // Lock the mutex so the thread can write from the PCB array
-			dyn_array_push_front(ready_queue, current); // If there is still burst time left in the process, add it to the back (the front) of the queue
+		if(!dyn_array_empty(ready_queue)) {
+			dyn_array_extract_back(ready_queue, current);
+			printf("\nGRABBING NEW PROCESS RR: %u\n", current->remaining_burst_time);
 			pthread_mutex_unlock(&mutex); // Unlock mutex so that other threads can use it 
+			if(current->started == 0) {
+				current->started = 1; // flip the started variable in the PCB
+				total_latency += clocktime;
+			}
+			for (size_t i = 0;i<QUANTUM;++i) {
+				printf("\nCPU RR");
+				virtual_cpu(current);
+				clocktime++;
+				if(current->remaining_burst_time == 0) {
+					break; // break from the for loop if the process is done executing before reaching the quantum
+				} 	
+			}
+			// ...since the wall clock will be increased for all processes in the queue that are already running each time a different process executes
+			if(current->remaining_burst_time == 0) {
+				total_clock_time += clocktime;
+				continue;
+			} else {
+				pthread_mutex_lock(&mutex); // Lock the mutex so the thread can write from the PCB array
+				dyn_array_push_front(ready_queue, current); // If there is still burst time left in the process, add it to the back (the front) of the queue
+				pthread_mutex_unlock(&mutex); // Unlock mutex so that other threads can use it 
+			}
+		} else {
+			pthread_mutex_unlock(&mutex); // Unlock the mutex so another thread can use it
+			break;
 		}
 	}
 
