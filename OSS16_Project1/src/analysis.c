@@ -77,8 +77,8 @@ int main(int argc, char **argv) {
 		} else { // In the event that an invalid core slipped through the first check 
 			printf("\nCannot create thread, an input is labeled incorrectly...(This error should never happen)...\n");
 			// Free all memory made so far 
-			for (int i=0;i<num_cores;++i) {
-				free((the_input+i)->results);
+			for (int j=0;j<num_cores;++j) {
+				free((the_input+j)->results);
 			}
 			free(the_input);
 			dyn_array_destroy(PCB_array);
@@ -94,8 +94,8 @@ int main(int argc, char **argv) {
 		if (rc) { // Checks that the thread was joined properly
 			printf("\nERROR: Return code from pthread_join is: %d...\n", rc);
 			// Free all memory made so far 
-			for (int i=0;i<num_cores;++i) {
-				free((the_input+i)->results);
+			for (int j=0;j<num_cores;++j) {
+				free((the_input+j)->results);
 			}
 			free(the_input);
 			dyn_array_destroy(PCB_array);

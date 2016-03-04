@@ -8,7 +8,8 @@ find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
 
-set(CMAKE_CXX_FLAGS "-std=c++0x -Wall -Wextra -Wshadow -Werror -g")
+#set(CMAKE_CXX_FLAGS "-std=c++0x -Wall -Wextra -Wshadow -Werror -g")
+set(CMAKE_C_FLAGS "-std=c99 -Wall -Wextra -Wshadow -Werror -g")
 
 # Link runTests with what we want to test and the GTest and pthread library
 add_executable(project_test test/tests.cpp)
