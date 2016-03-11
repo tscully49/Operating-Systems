@@ -64,12 +64,12 @@ back_store_t *back_store_open(const char *const fname) {
 
 	back_store_t* output = (back_store_t *)malloc(sizeof(back_store_t)); // malloc memory for back_store struct
 	if (output == NULL) return NULL; // Error check the malloc 
-	uint8_t bitmap_buffer[BLOCK_SIZE * NUM_FBM_BLOCKS]; // Create buffer for the bitmap data from the bs file
+	uint8_t bitmap_buffer[FBM_SIZE]; // Create buffer for the bitmap data from the bs file
 
 	// READ the bitmap from file (first 8KB) to the FBM attribute
 	if (lseek(fd, 0, SEEK_SET) >= 0) { // Go to beginning of file 
-		if (read(fd, bitmap_buffer, BLOCK_SIZE * NUM_FBM_BLOCKS) > 0) { // Read the bitmap DATA from the bs file 
-			bitmap_t* new_bitmap = bitmap_import(BLOCK_SIZE * NUM_FBM_BLOCKS * 8, bitmap_buffer); // create a bitmap with the read data
+		if (read(fd, bitmap_buffer, FBM_SIZE) > 0) { // Read the bitmap DATA from the bs file 
+			bitmap_t* new_bitmap = bitmap_import(FBM_SIZE * 8, bitmap_buffer); // create a bitmap with the read data
 			if (new_bitmap != NULL) { // check that the import worked correctly 
 				output->FBM = new_bitmap; // add bitmap to struct
 				output->fd = fd; // add the file descriptor to the struct
@@ -88,7 +88,7 @@ void back_store_close(back_store_t *const bs) {
 	const uint8_t *bitmap_buffer = bitmap_export(bs->FBM); // Export the bitmap data to a buffer
 	if (bitmap_buffer != NULL) { // check that the export worked correctly 
 		if (lseek(bs->fd, 0, SEEK_SET) >= 0) { // seek to beginning of bs file 
-			if (write(bs->fd, (void *)bitmap_buffer, BLOCK_SIZE * NUM_FBM_BLOCKS) == -1) { // write to the bs file 
+			if (write(bs->fd, bitmap_buffer, FBM_SIZE) == -1) { // write to the bs file 
 				printf("\nERROR writing bitmap data to file.");
 			}
 		}
