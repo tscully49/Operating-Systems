@@ -8,6 +8,8 @@ extern "C" {
 #include "../src/back_store.c"
 }
 
+#include "../include/back_store.h"
+
 unsigned int score;
 
 class GradeEnvironment : public testing::Environment {
@@ -94,6 +96,7 @@ TEST(bs_a_lot, basic_use) {
     // pretty much do everything
     // read: did you save the fbm changes? data?
     back_store_t *bs = back_store_create("test_b.bs");
+
     ASSERT_NE(nullptr, bs);
 
     unsigned block_a = back_store_allocate(bs);
@@ -156,6 +159,9 @@ TEST(bs_request_release, fbm_attack) {
         ASSERT_FALSE(back_store_read(bs, i, buffer));
         ASSERT_FALSE(back_store_write(bs, i, buffer));
     }
+
+    back_store_close(bs);
+
     score += 6;
 }
 
@@ -164,7 +170,11 @@ TEST(bs_request, fill_device) {
     for (unsigned i = 8; i < 65536; ++i) {
         ASSERT_TRUE(back_store_request(bs, i));
     }
+
     ASSERT_EQ(back_store_allocate(bs), 0);
+    
+    back_store_close(bs);
+
     score += 6;
 }
 

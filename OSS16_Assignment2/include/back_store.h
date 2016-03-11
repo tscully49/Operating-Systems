@@ -2,6 +2,8 @@
 #define _BACK_STORE_H__
 
 #include <stdbool.h>
+#include <bitmap.h>
+#include <stdint.h>
 
 // Back store object
 // It's an opaque object whose implementation is up to you
