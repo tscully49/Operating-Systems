@@ -1,9 +1,3 @@
-#include <fcntl.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
 #include "../include/back_store.h"
 
 #define NUM_BLOCKS 65536
