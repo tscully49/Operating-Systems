@@ -174,7 +174,7 @@ TEST(bs_request, fill_device) {
     ASSERT_EQ(back_store_allocate(bs), 0);
     
     back_store_close(bs);
-
+    
     score += 6;
 }
 
