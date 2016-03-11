@@ -4,6 +4,12 @@
 #include <stdbool.h>
 #include <bitmap.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
 
 // Back store object
 // It's an opaque object whose implementation is up to you
