@@ -52,4 +52,6 @@ bool initialize (void);
 //Detatches the back_store
 void destroy(void);
 
+int countSetBits(unsigned char ch);
+
 #endif
