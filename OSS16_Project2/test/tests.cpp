@@ -181,7 +181,7 @@ TEST (LFU, GoodInputMixPageFaults) {
 	for (clock_time = 0; clock_time < 2048; ++clock_time) {
 		
 
-		page_request_result_t* prr = approx_least_recently_used(clock_time,clock_time);
+		page_request_result_t* prr = least_frequently_used(clock_time,clock_time);
 		if (prr != NULL) { 
 			page_faults++;
 			free(prr);
