@@ -2,8 +2,9 @@
 #define _S16FS_H__
 
 #include <sys/types.h>
-
+#include <back_store.h>
 #include <dyn_array.h>
+#include <bitmap.h>
 
 typedef struct S16FS S16FS_t;
 
@@ -11,8 +12,9 @@ typedef enum { FS_SEEK_SET, FS_SEEK_CUR, FS_SEEK_END } seek_t;
 
 typedef enum { FS_REGULAR, FS_DIRECTORY } file_t;
 
-#define FS_FNAME_MAX (64)
-// INCLUDING null terminator
+#define FS_FNAME_MAX (64) // INCLUDING null terminator
+#define DESCRIPTOR_MAX (256)
+#define DIR_REC_MAX (15)
 
 typedef struct {
     // You can add more if you want
