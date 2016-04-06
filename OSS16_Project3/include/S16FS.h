@@ -5,16 +5,57 @@
 #include <back_store.h>
 #include <dyn_array.h>
 #include <bitmap.h>
+#include <string.h>
+#include <stdio.h>
 
 typedef struct S16FS S16FS_t;
 
+typedef uint16_t block_ptr_t;
+
+typedef uint8_t inode_ptr_t;
+
 typedef enum { FS_SEEK_SET, FS_SEEK_CUR, FS_SEEK_END } seek_t;
 
-typedef enum { FS_REGULAR, FS_DIRECTORY } file_t;
+typedef enum { FS_REGULAR, FS_DIRECTORY } file_t; // 0,1
 
 #define FS_FNAME_MAX (64) // INCLUDING null terminator
 #define DESCRIPTOR_MAX (256)
 #define DIR_REC_MAX (15)
+
+typedef struct {
+	uint32_t size;
+	uint8_t type;
+	uint8_t padding[43];
+} mdata_t;
+
+typedef struct {
+	char fname[FS_FNAME_MAX];
+	mdata_t mdata;
+	block_ptr_t data_ptrs[8];
+} inode_t;
+
+typedef struct {
+	char fname[FS_FNAME_MAX];
+	inode_ptr_t inode;
+} dir_ent_t;
+
+typedef struct {
+	mdata_t mdata;
+	dir_ent_t entries[DIR_REC_MAX];
+	uint8_t padding;
+} dir_block_t;
+
+typedef struct {
+	bitmap_t *fd_status;
+	size_t fd_pos[DESCRIPTOR_MAX];
+	inode_ptr_t fd_inode[DESCRIPTOR_MAX];
+} fd_table_t;
+
+typedef struct {
+	inode_t *parent_directory;
+	inode_t *current_inode;
+} traversal_results_t;
+
 
 typedef struct {
     // You can add more if you want
