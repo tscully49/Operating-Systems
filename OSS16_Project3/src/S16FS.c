@@ -17,6 +17,7 @@ bool format_inode_table(S16FS_t *fs);
 bool read_inode_array_from_backstore(S16FS_t *fs);
 int find_open_inode(S16FS_t *fs);
 traversal_results_t tree_traversal(S16FS_t *fs, const char *path);
+bool add_inode_to_parent_dir(S16FS_t *fs, dir_block_t temp, traversal_results_t traverse, uint8_t type, int open_inode, block_ptr_t root_block);
 
 S16FS_t *fs_format(const char *path) {
 	if (!path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL;
@@ -87,6 +88,7 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 		dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t));
 		root_dir->mdata.type = FS_DIRECTORY;
 		if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) return false;
+		free(root_dir);
 
 		dir_block_t temp;
 		if (back_store_read(fs->bs, traverse.parent_directory.data_ptrs[0], &temp) == false) {
@@ -94,24 +96,9 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 			return -1;
 		}
 
-		bool added = get_open_entry(temp);
+		bool added = add_inode_to_parent_dir(fs, temp, traverse, FS_DIRECTORY, open_inode, root_block);
+		if (added == false) return -1;
 
-		if (added == false) {
-			printf("FS_Create error: NO room in the directory to add file!");
-			free(root_dir);
-			return -1;
-		} else {
-			if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
-				free(root_dir);
-				printf("Could not add file to directory");
-				return -1;
-			}
-		}
-
-		fs->inode_array[open_inode] = (inode_t){"",{0, FS_DIRECTORY, {}}, {root_block}};
-		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
-
-		free(root_dir);
 	} else {
 		int open_inode = find_open_inode(fs);
 		if (open_inode < 1) {
@@ -126,31 +113,9 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 			return -1;
 		}
 
-		// add the inode # to the parent dir
-		bool added = false;
-		for (int i=0; i<DIR_REC_MAX; ++i) {
+		bool added = add_inode_to_parent_dir(fs, temp, traverse, FS_REGULAR, open_inode, 0);
+		if (added == false) return -1;	
 
-			if (strlen(temp.entries[i].fname) == 0) {
-				strcpy(temp.entries[i].fname, traverse.fname);
-				temp.entries[i].inode = open_inode;
-				added = true;
-				break;
-			}
-		}
-
-		if (added == false) {
-			printf("FS_Create error: NO room in the directory to add file!");
-			return -1;
-		} else {
-			if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
-				printf("Could not add file to directory");
-				return -1;
-			}
-		}
-		//write dir block to BS
-
-		fs->inode_array[open_inode] = (inode_t){"0",{0, FS_REGULAR, {}}, {}};
-		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
 	}
 
 	if (write_inode_array_to_backstore(fs) == false) return -1;
@@ -376,14 +341,32 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 	return results;
 }
 
-bool get_open_entry(dir_block_t temp) {
+bool add_inode_to_parent_dir(S16FS_t *fs, dir_block_t temp, traversal_results_t traverse, uint8_t type, int open_inode, block_ptr_t root_block) {
+	bool added = false;
 	for (int i=0; i<DIR_REC_MAX; ++i) {
 
 		if (strlen(temp.entries[i].fname) == 0) {
 			strcpy(temp.entries[i].fname, traverse.fname);
 			temp.entries[i].inode = open_inode;
-			return true;
+			added = true;
+			break;
 		}
 	}
-	return false;
+
+	if (added == false) {
+		printf("FS_Create error: NO room in the directory to add file!");
+		return false;
+	} else {
+		if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
+			printf("Could not add file to directory");
+			return false;
+		}
+	}
+	if (type == FS_DIRECTORY) {
+		fs->inode_array[open_inode] = (inode_t){"",{0, type, {}}, {root_block}};
+	} else {
+		fs->inode_array[open_inode] = (inode_t){"",{0, type, {}}, {}};
+	}
+	strcpy(fs->inode_array[open_inode].fname,traverse.fname);
+	return true;
 }
