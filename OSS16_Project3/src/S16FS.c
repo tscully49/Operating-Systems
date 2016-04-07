@@ -94,16 +94,7 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 			return -1;
 		}
 
-		bool added = false;
-		for (int i=0; i<DIR_REC_MAX; ++i) {
-
-			if (strlen(temp.entries[i].fname) == 0) {
-				strcpy(temp.entries[i].fname, traverse.fname);
-				temp.entries[i].inode = open_inode;
-				added = true;
-				break;
-			}
-		}
+		bool added = get_open_entry(temp);
 
 		if (added == false) {
 			printf("FS_Create error: NO room in the directory to add file!");
@@ -383,4 +374,16 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 	printf("\nUnexpected Error in traversing tree, reached end of function...");
 	results.error_code = -1;
 	return results;
+}
+
+bool get_open_entry(dir_block_t temp) {
+	for (int i=0; i<DIR_REC_MAX; ++i) {
+
+		if (strlen(temp.entries[i].fname) == 0) {
+			strcpy(temp.entries[i].fname, traverse.fname);
+			temp.entries[i].inode = open_inode;
+			return true;
+		}
+	}
+	return false;
 }
