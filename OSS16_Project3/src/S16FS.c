@@ -64,7 +64,10 @@ int fs_unmount(S16FS_t *fs) {
 }
 
 int fs_create(S16FS_t *fs, const char *path, file_t type) {
-	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return -1;
+	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
+		printf("\nBad Parameters for fs_create");
+		return -1;
+	}
 
 	// find open inode
 	int open_inode = find_open_inode(fs);
@@ -72,9 +75,10 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 
 	traversal_results_t traverse = tree_traversal(fs, path);
 	if (traverse.error_code != 0) {
+		printf("\nTRAVERSE FAILED!!!");
 		return -1;
 	} else {
-		printf("\nTraverse worked!!!\n");
+		printf("\nTraverse worked!!!");
 	}
 
 	if (type == FS_DIRECTORY) {
@@ -82,11 +86,71 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 		block_ptr_t root_block = back_store_allocate(fs->bs);
 		fs->inode_array[open_inode] = (inode_t){"",{0, FS_DIRECTORY, {}}, {root_block}};
 		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
+		
 		dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t));
 		root_dir->mdata.type = FS_DIRECTORY;
 		if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) return false;
+
+		dir_block_t temp;
+		if (back_store_read(fs->bs, traverse.parent_directory.data_ptrs[0], &temp) == false) {
+			printf("FS_Create error: Could not read directory");
+			return -1;
+		}
+
+		bool added = false;
+		for (int i=0; i<DIR_REC_MAX; ++i) {
+
+			if (strlen(temp.entries[i].fname) == 0) {
+				strcpy(temp.entries[i].fname, traverse.fname);
+				temp.entries[i].inode = open_inode;
+				added = true;
+				break;
+			}
+		}
+
+		if (added == false) {
+			printf("FS_Create error: NO room in the directory to add file!");
+			return -1;
+		} else {
+			if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
+				printf("Could not add file to directory");
+				return -1;
+			}
+		}
 	} else {
-		// nothing since the file is empty
+
+		fs->inode_array[open_inode] = (inode_t){"",{0, FS_REGULAR, {}}, {}};
+		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
+
+		// load parent dir
+		dir_block_t temp;
+		if (back_store_read(fs->bs, traverse.parent_directory.data_ptrs[0], &temp) == false) {
+			printf("FS_Create error: Could not read directory");
+			return -1;
+		}
+
+		// add the inode # to the parent dir
+		bool added = false;
+		for (int i=0; i<DIR_REC_MAX; ++i) {
+
+			if (strlen(temp.entries[i].fname) == 0) {
+				strcpy(temp.entries[i].fname, traverse.fname);
+				temp.entries[i].inode = open_inode;
+				added = true;
+				break;
+			}
+		}
+
+		if (added == false) {
+			printf("FS_Create error: NO room in the directory to add file!");
+			return -1;
+		} else {
+			if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
+				printf("Could not add file to directory");
+				return -1;
+			}
+		}
+		//write dir block to BS
 	}
 
 	if (write_inode_array_to_backstore(fs) == false) return -1;
@@ -111,6 +175,7 @@ bool format_inode_table(S16FS_t *fs) {
 	block_ptr_t root_block = back_store_allocate(fs->bs);
 	fs->inode_array[0] = (inode_t){"/",{0, FS_DIRECTORY, {}}, {root_block}};
 	if (write_inode_array_to_backstore(fs) == false) return false;
+
 	fs->root_inode_number = root_block;
 
 	dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t));
@@ -153,7 +218,7 @@ int find_open_inode(S16FS_t *fs) {
 	inode_t *intbl = fs->inode_array;
 	for (int i = 0; i < DESCRIPTOR_MAX; ++i) {
 		if (!*(intbl + i)->fname) {
-			printf("\n\n%d\n\n", i);
+			//printf("\n\n%d\n\n", i);
 			return i;
 		}
 	}
@@ -164,22 +229,30 @@ int find_open_inode(S16FS_t *fs) {
 traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 	// Set default return structure values
 	traversal_results_t results = {{}, {}, "", 0}; // set to the root
-	if (back_store_read(fs->bs, fs->inode_array->data_ptrs[0], &results.parent_directory) == false) {
-		printf("\nTraverse Error: Could not read root directory from BS\n");
+	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
+		printf("\nTraverse Error: Parameter Error");
 		results.error_code = -1;
 		return results;
 	}
 
-	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
+	if (*path != '/') {
+		printf("\nTraverse Error: Path must start with '/' character");
 		results.error_code = -1;
-		printf("\nTraverse Error: Parameter Error\n");
 		return results;
 	}
+
+	if (*(path + strlen(path)-1) == '/') {
+		printf("\nTraverse Error: Path cannot end with a '/' character");
+		results.error_code = -1;
+		return results;
+	}
+
+	results.parent_directory = *fs->inode_array;
 
 	// Declare current directory
 	dir_block_t dir;
-	if (back_store_read(fs->bs, fs->inode_array->data_ptrs[0], &dir) == false) {
-		printf("\nTraverse Error: read to first directory failed\n");
+	if (back_store_read(fs->bs, results.parent_directory.data_ptrs[0], &dir) == false) {
+		printf("\nTraverse Error: read to first directory failed");
 		results.error_code = -1;
 		return results;
 	}
@@ -194,52 +267,91 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 	uint8_t file_type = dir.mdata.type;
 	token = strtok(new_path, "/"); // get the first token
 
+	if (token) {
+		if (strlen(token) >= 64) {
+			printf("\nTraverse Error: Filename too long ---> %s\n", token);
+			results.error_code = 3;
+			return results;
+		}
+	}
+
 	while (token != NULL) {
-		printf("\n%s\n", token);
 
 		previous_token = token;
 		token = strtok(NULL, "/");
+
 		if (token != NULL) {
+
+			// printf("\n\nSIZE: %d", strlen(token));
+			// printf("\n%s\n", token);
+			// Make sure that the next token is within the 64 character constraint
+			if (strlen(token) >= 64) {
+				printf("\nTraverse Error: Filename too long ---> %s\n", token);
+				results.error_code = 3;
+				return results;
+			}
+
 			// Search for filename in the current directory's directory block
 			bool found = false;
 
 			// for loop through directory to search for filename in current directory
 			for (int i = 0; i < DIR_REC_MAX; ++i) {
-				if (strcmp(previous_token, (fs->inode_array + i)->fname) == 0) {
+				//printf("\nI: %d\nPREV: %s\nDIR: %s\n", i, previous_token, dir.entries[i].fname);
+				if (strcmp(previous_token, dir.entries[i].fname) == 0) {
 					found = true;
-					current_inode_index = i;
+					current_inode_index = dir.entries[i].inode;
+					break;
 				}
 			}
 
-			if (found == false) { // if the file was not found 
-				printf("Error in traversing tree:  File not Found in the Current Directory");
+			if (found == false) { // if the file was not found
+				printf("\nError in traversing tree:  File not Found in the Current Directory");
 				results.error_code = 1;
 				return results;
 			} else { // if the file was found 
 				if (file_type == FS_DIRECTORY) { // if file type is directory AND there IS more tokenizing to do
 					// load current directory to
 					if (back_store_read(fs->bs, (fs->inode_array + current_inode_index)->data_ptrs[0], &dir) == false) {
-						printf("\nTraverse Error: read to first directory failed\n");
+						printf("\nTraverse Error: read to next directory failed");
 						results.error_code = -1;
 						return results;
 					}
+
+					results.parent_directory = *(fs->inode_array + current_inode_index);
+
 					file_type = dir.mdata.type;
 				} else if (file_type == FS_REGULAR) { // if file type is regular AND there IS more tokenizing to do 
-					printf("\nError in Traversing File: Reached a file but not done traversing tree\n");
+					printf("\nError in Traversing File: Reached a file but not done traversing tree");
 					results.error_code = 1;
 					return results;
 				}
 			}
 		} else { // 
-			if (file_type == FS_REGULAR) { // file type is regular AND there is NOT more tokenizing to do
-				// return the current inode number and the parent inode number
-				strcpy(results.fname,previous_token);
+			bool found = false;
+
+			for (int i = 0; i < DIR_REC_MAX; ++i) {
+				if (strcmp(previous_token, dir.entries[i].fname) == 0) {
+					found = true;
+					current_inode_index = i;
+					break;
+				}
+			}
+
+			if (found != false) { // if the file was not found 
+				printf("Traverse Tree Error:  File/Directory Already exists");
+				results.error_code = 1;
 				return results;
-			} else { // else unknown error
-				//printf("\nUnknown error in traversing file tree\n");
-				//results.error_code = -1;
-				strcpy(results.fname,previous_token);
-				return results;
+			} else {
+				if (file_type == FS_REGULAR) { // file type is regular AND there is NOT more tokenizing to do
+					// return the current inode number and the parent inode number
+					strcpy(results.fname,previous_token);
+					return results;
+				} else { // else unknown error
+					//printf("\nUnknown error in traversing file tree\n");
+					//results.error_code = -1;
+					strcpy(results.fname,previous_token);
+					return results;
+				}
 			}
 		}
 	}

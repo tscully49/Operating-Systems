@@ -50,7 +50,7 @@ typedef struct {
 } fd_table_t;
 
 typedef struct {
-	dir_block_t parent_directory; // -1 = default value (means null if returned)
+	inode_t parent_directory; // -1 = default value (means null if returned)
 	inode_t current_inode; // -1 = default value (means null if returned)
 	char fname[64]; // the filename
 	int error_code; // 0 = no error; 1 = file not found; -1 = unknown error;
