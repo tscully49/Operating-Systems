@@ -10,7 +10,6 @@ struct S16FS {
 	back_store_t *bs;
 	fd_table_t fd_table;
 	inode_t *inode_array;
-	int root_inode_number;
 };
 
 bool write_inode_array_to_backstore(S16FS_t *fs);
@@ -55,7 +54,7 @@ int fs_unmount(S16FS_t *fs) {
 	// free inode array
 	free(fs->inode_array);
 	// free backstore
-	free(fs->bs);
+	back_store_close(fs->bs);
 
 	// free filesystem
 	free(fs);
@@ -69,10 +68,6 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 		return -1;
 	}
 
-	// find open inode
-	int open_inode = find_open_inode(fs);
-	if (open_inode < 1) return -1; // < 1 because a return of 0 would be the root inode, which is an error
-
 	traversal_results_t traverse = tree_traversal(fs, path);
 	if (traverse.error_code != 0) {
 		printf("\nTRAVERSE FAILED!!!");
@@ -82,11 +77,13 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 	}
 
 	if (type == FS_DIRECTORY) {
+		int open_inode = find_open_inode(fs);
+		if (open_inode < 1) {
+			printf("\nError: Out of inodes");
+			return -1; // < 1 because a return of 0 would be the root inode, which is an error
+		}
 		// fill the first dataptr with an empty directory_block
 		block_ptr_t root_block = back_store_allocate(fs->bs);
-		fs->inode_array[open_inode] = (inode_t){"",{0, FS_DIRECTORY, {}}, {root_block}};
-		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
-		
 		dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t));
 		root_dir->mdata.type = FS_DIRECTORY;
 		if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) return false;
@@ -110,17 +107,26 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 
 		if (added == false) {
 			printf("FS_Create error: NO room in the directory to add file!");
+			free(root_dir);
 			return -1;
 		} else {
 			if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) {
+				free(root_dir);
 				printf("Could not add file to directory");
 				return -1;
 			}
 		}
-	} else {
 
-		fs->inode_array[open_inode] = (inode_t){"",{0, FS_REGULAR, {}}, {}};
+		fs->inode_array[open_inode] = (inode_t){"",{0, FS_DIRECTORY, {}}, {root_block}};
 		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
+
+		free(root_dir);
+	} else {
+		int open_inode = find_open_inode(fs);
+		if (open_inode < 1) {
+			printf("\nError: Out of inodes");
+			return -1; // < 1 because a return of 0 would be the root inode, which is an error
+		}
 
 		// load parent dir
 		dir_block_t temp;
@@ -151,6 +157,9 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 			}
 		}
 		//write dir block to BS
+
+		fs->inode_array[open_inode] = (inode_t){"0",{0, FS_REGULAR, {}}, {}};
+		strcpy(fs->inode_array[open_inode].fname,traverse.fname);
 	}
 
 	if (write_inode_array_to_backstore(fs) == false) return -1;
@@ -169,18 +178,26 @@ bool format_inode_table(S16FS_t *fs) {
 
 	// requests all the blocks in the BS for the inode table
 	for (int block=8; block<40; ++block) { // Have to start at 8 because blocks 0-7 are the FBM in the backstore 	
-		if (back_store_request(fs->bs, block) != true) return false;
+		if (back_store_request(fs->bs, block) != true) {
+			free(fs->inode_array);
+			return false;
+		}
 	}
 
 	block_ptr_t root_block = back_store_allocate(fs->bs);
 	fs->inode_array[0] = (inode_t){"/",{0, FS_DIRECTORY, {}}, {root_block}};
-	if (write_inode_array_to_backstore(fs) == false) return false;
-
-	fs->root_inode_number = root_block;
+	if (write_inode_array_to_backstore(fs) == false) {
+		free(fs->inode_array);
+		return false;
+	}
 
 	dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t));
 	root_dir->mdata.type = FS_DIRECTORY;
-	if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) return false;
+	if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) {
+		free(fs->inode_array);
+		return false;
+	}
+	free(root_dir);
 
 	return true;
 }
@@ -218,7 +235,6 @@ int find_open_inode(S16FS_t *fs) {
 	inode_t *intbl = fs->inode_array;
 	for (int i = 0; i < DESCRIPTOR_MAX; ++i) {
 		if (!*(intbl + i)->fname) {
-			//printf("\n\n%d\n\n", i);
 			return i;
 		}
 	}
@@ -271,6 +287,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 		if (strlen(token) >= 64) {
 			printf("\nTraverse Error: Filename too long ---> %s\n", token);
 			results.error_code = 3;
+			free (new_path);
 			return results;
 		}
 	}
@@ -288,6 +305,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 			if (strlen(token) >= 64) {
 				printf("\nTraverse Error: Filename too long ---> %s\n", token);
 				results.error_code = 3;
+				free(new_path);
 				return results;
 			}
 
@@ -307,6 +325,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 			if (found == false) { // if the file was not found
 				printf("\nError in traversing tree:  File not Found in the Current Directory");
 				results.error_code = 1;
+				free(new_path);
 				return results;
 			} else { // if the file was found 
 				if (file_type == FS_DIRECTORY) { // if file type is directory AND there IS more tokenizing to do
@@ -314,6 +333,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 					if (back_store_read(fs->bs, (fs->inode_array + current_inode_index)->data_ptrs[0], &dir) == false) {
 						printf("\nTraverse Error: read to next directory failed");
 						results.error_code = -1;
+						free(new_path);
 						return results;
 					}
 
@@ -323,6 +343,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 				} else if (file_type == FS_REGULAR) { // if file type is regular AND there IS more tokenizing to do 
 					printf("\nError in Traversing File: Reached a file but not done traversing tree");
 					results.error_code = 1;
+					free(new_path);
 					return results;
 				}
 			}
@@ -340,6 +361,7 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 			if (found != false) { // if the file was not found 
 				printf("Traverse Tree Error:  File/Directory Already exists");
 				results.error_code = 1;
+				free(new_path);
 				return results;
 			} else {
 				if (file_type == FS_REGULAR) { // file type is regular AND there is NOT more tokenizing to do
@@ -350,11 +372,13 @@ traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
 					//printf("\nUnknown error in traversing file tree\n");
 					//results.error_code = -1;
 					strcpy(results.fname,previous_token);
+					free(new_path);
 					return results;
 				}
 			}
 		}
 	}
+	free(new_path);
 
 	printf("\nUnexpected Error in traversing tree, reached end of function...");
 	results.error_code = -1;
