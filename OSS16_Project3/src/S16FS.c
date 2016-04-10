@@ -1,370 +1,342 @@
-#include "S16FS.h"
+#include <back_store.h>
+#include <bitmap.h>
+
+#include <stdint.h>
 #include <stdio.h>
-#include <string.h>
+#include <time.h>
 
-// metadata, inode, S16FS_t ---> padding at end???
+#include "S16FS.h"
 
-// directory, directory block, file descriptor tables ---> From design 
+// There's just so much. SO. MUCH.
+// Last time it was all in the file.
+// There was just so much
+// It messes up my autocomplete, but whatever.
+#include "backend.h"
 
-struct S16FS {
-	back_store_t *bs;
-	fd_table_t fd_table;
-	inode_t *inode_array;
-};
-
-bool write_inode_array_to_backstore(S16FS_t *fs);
-bool format_inode_table(S16FS_t *fs);
-bool read_inode_array_from_backstore(S16FS_t *fs);
-int find_open_inode(S16FS_t *fs);
-traversal_results_t tree_traversal(S16FS_t *fs, const char *path);
-bool add_inode_to_parent_dir(S16FS_t *fs, dir_block_t temp, traversal_results_t traverse, uint8_t type, int open_inode, block_ptr_t root_block);
-
+///
+/// Formats (and mounts) an S16FS file for use
+/// \param fname The file to format
+/// \return Mounted S16FS object, NULL on error
+///
 S16FS_t *fs_format(const char *path) {
-	if (!path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL; // param check
-
-	S16FS_t *fs = (S16FS_t *)calloc(1, sizeof(S16FS_t)); // find memory and initialize for the filesystem object
-	if (!fs) return NULL;
-
-	fs->bs = back_store_create(path); // create the back store
-	if (fs->bs == NULL) return NULL;
-
-	if (format_inode_table(fs) == false) return NULL; // call function to format the inode table
-
-	return fs; // return the file system
+    return ready_file(path, true);
 }
 
+///
+/// Mounts an S16FS object and prepares it for use
+/// \param fname The file to mount
+/// \return Mounted F16FS object, NULL on error
+///
 S16FS_t *fs_mount(const char *path) {
-	if (!path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL; // param check 
-
-	S16FS_t *fs = (S16FS_t *)malloc(sizeof(S16FS_t)); // get memory for the file system structure but don't initialize it
-	if (!fs) return NULL;
-
-	fs->bs = back_store_open(path); // open the back store and load to the backstore
-	if (fs->bs == NULL) return NULL;
-
-	if (read_inode_array_from_backstore(fs) == false) return NULL; // read the inode array from the backstore 
-
-	return fs; // return the file system
+    return ready_file(path, false);
 }
 
+///
+/// Unmounts the given object and frees all related resources
+/// \param fs The S16FS object to unmount
+/// \return 0 on success, < 0 on failure
+///
 int fs_unmount(S16FS_t *fs) {
-	if (!fs) return -1; // param check
-
-	// write inode array to BS
-	if (write_inode_array_to_backstore(fs) != true) return -1;
-	// free inode array
-	free(fs->inode_array);
-	// free backstore
-	back_store_close(fs->bs);
-
-	// free filesystem
-	free(fs);
-
-	return 0; // return 0 if no errors
+    if (fs) {
+        back_store_close(fs->bs);
+        bitmap_destroy(fs->fd_table.fd_status);
+        free(fs);
+        return 0;
+    }
+    return -1;
 }
 
+///
+/// Creates a new file at the specified location
+///   Directories along the path that do not exist are not created
+/// \param fs The S16FS containing the file
+/// \param path Absolute path to file to create
+/// \param type Type of file to create (regular/directory)
+/// \return 0 on success, < 0 on failure
+///
 int fs_create(S16FS_t *fs, const char *path, file_t type) {
-	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) { // check params
-		printf("\nBad Parameters for fs_create");
-		return -1;
-	}
+    if (fs && path) {
+        if (type == FS_REGULAR || type == FS_DIRECTORY) {
+            // WHOOPS. Should make sure desired file doesn't already exist.
+            // Just going to jam it here.
+            result_t file_status;
+            locate_file(fs, path, &file_status);
+            if (file_status.success && !file_status.found) {
+                // alrighty. Need to find the file. And by the file I mean the parent.
+                // locate_file doesn't really handle finding the parent if the file doesn't exist
+                // So I can't just dump finding this file. Have to search for parent.
 
-	traversal_results_t traverse = tree_traversal(fs, path); // traverse the file path and get data from it
-	if (traverse.error_code != 0) { // check if the traversal worked or not 
-		printf("\nTRAVERSE FAILED!!!");
-		return -1;
-	} else {
-		printf("\nTraverse worked!!!");
-	}
+                // So, kick off the file finder. If it comes back with the right flags
+                // Start checking if we have inodes, the parent exists, a directory, not full
+                // if it's a dir check if we have a free block.
+                // Fill it all out, update parent, etc. Done!
+                const size_t path_len = strnlen(path, FS_PATH_MAX);
+                if (path_len != 0 && path[0] == '/' && path_len < FS_PATH_MAX) {
+                    // path string is probably ok.
+                    char *path_copy, *fname_copy;
+                    // this breaks if it's a file at root, since we remove the slash
+                    // locate_file treats it as an error
+                    // Old version just worked around if if [0] was '\0'
+                    // Ideally, I could just ask strndup to allocate an extra byte
+                    // Then I can just shift the fname down a byte and insert the NUL there
+                    // But strndup doesn't allocate the size given, it seems
+                    // So we gotta go manual. Don't think this snippet will be needed elsewhere
+                    // Need a malloc, memcpy, then some manual adjustment
+                    // path_copy  = strndup(path, path_len);  // I checked, it's not +1. yay MallocScribble
+                    path_copy = (char *) calloc(1, path_len + 2);  // NUL AND extra space
+                    memcpy(path_copy, path, path_len);
+                    fname_copy = strrchr(path_copy, '/');
+                    if (fname_copy) {  // CANNOT be null, since we validated [0] as a possibility... but just in case
+                        //*fname_copy = '\0';  // heh, split strings, now I have a path to parent AND fname
+                        ++fname_copy;
+                        const size_t fname_len = path_len - (fname_copy - path_copy);
+                        memmove(fname_copy + 1, fname_copy, fname_len + 1);
+                        fname_copy[0] = '\0';  // string is split into abs path (now with slash...) and fname
+                        ++fname_copy;
 
-	if (type == FS_DIRECTORY) { // if the file to be created was a directory or not
-		int open_inode = find_open_inode(fs); // find an open inode
-		if (open_inode < 1) { // make sure the inode is not the root
-			printf("\nError: Out of inodes");
-			return -1; // < 1 because a return of 0 would be the root inode, which is an error
-		}
-		// fill the first dataptr with an empty directory_block
-		block_ptr_t root_block = back_store_allocate(fs->bs); // allocate a block for the directory
-		dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t)); // find memory for the directory
-		root_dir->mdata.type = FS_DIRECTORY; // set the metadata type to directory
-		if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) return false; // write the block to the back store
-		free(root_dir);
+                        if (fname_len != 0 && fname_len < (FS_FNAME_MAX - 1)) {
+                            // alrighty. Hunt down parent dir.
+                            // check it's actually a dir. (ooh, add to result_t!)
+                            locate_file(fs, path_copy, &file_status);
+                            if (file_status.success && file_status.found && file_status.type == FS_DIRECTORY) {
+                                // parent exists, is a directory. Cool.
+                                // (added block to locate_file if file is a dir. Handy.)
+                                dir_block_t parent_dir;
+                                inode_t new_inode;
+                                dir_block_t new_dir;
+                                uint32_t now = time(NULL);
+                                // load dir, check it has space.
+                                if (full_read(fs, &parent_dir, file_status.block)
+                                    && parent_dir.mdata.size < DIR_REC_MAX) {
+                                    // try to grab all new resources (inode, optionally data block)
+                                    // if we get all that, commit it.
+                                    inode_ptr_t new_inode_idx = find_free_inode(fs);
+                                    if (new_inode_idx != 0) {
+                                        bool success            = false;
+                                        block_ptr_t new_dir_ptr = 0;
+                                        switch (type) {
+                                            case FS_REGULAR:
+                                                // We're all good.
+                                                new_inode = (inode_t){
+                                                    {0},
+                                                    {0, 0777, now, now, now, file_status.inode, FS_REGULAR, {0}},
+                                                    {0}};
+                                                strncpy(new_inode.fname, fname_copy, fname_len + 1);
+                                                // I'm so deep now that my formatter is very upset with every line
+                                                // inode = ready
+                                                success = write_inode(fs, &new_inode, new_inode_idx);
+                                                // Uhh, if that didn't work we could, worst case, have a partial inode
+                                                // And that's a "file system is now kinda busted" sort of error
+                                                // This is why "real" (read: modern) file systems have backups all over
+                                                // (and why the occasional chkdsk is so important)
+                                                break;
+                                            case FS_DIRECTORY:
+                                                // following line keeps being all "Expected expression"
+                                                // SOMETHING is messed up SOMEWHERE.
+                                                // Or it's trying to protect me by preventing new variables in a switch
+                                                // Which is super undefined, but only sometimes (not in this case...)
+                                                // Idk, man.
+                                                // block_ptr_t new_dir_ptr = back_store_allocate(fs->bs);
+                                                new_dir_ptr = back_store_allocate(fs->bs);
+                                                if (new_dir_ptr != 0) {
+                                                    // Resources = obtained
+                                                    // write dir block first, inode is the final step
+                                                    // that's more transaction-safe... but it's not like we're thread
+                                                    // safe
+                                                    // in the slightest (or process safe, for that matter)
+                                                    new_inode = (inode_t){
+                                                        {0},
+                                                        {0, 0777, now, now, now, file_status.inode, FS_DIRECTORY, {0}},
+                                                        {new_dir_ptr, 0, 0, 0, 0, 0}};
+                                                    strncpy(new_inode.fname, fname_copy, fname_len + 1);
 
-		dir_block_t temp; // create temp variable to hold the parent directory to add the directory to 
-		if (back_store_read(fs->bs, traverse.parent_directory.data_ptrs[0], &temp) == false) { // read the data from back store 
-			printf("FS_Create error: Could not read directory");
-			return -1;
-		}
+                                                    memset(&new_dir, 0x00, sizeof(dir_block_t));
 
-		bool added = add_inode_to_parent_dir(fs, temp, traverse, FS_DIRECTORY, open_inode, root_block); // add the directory to the directory
-		if (added == false) return -1; // check to make sure that the directory was added 
-
-	} else {
-		int open_inode = find_open_inode(fs); // find an open inode
-		if (open_inode < 1) { // check that the inode is not the root
-			printf("\nError: Out of inodes");
-			return -1; // < 1 because a return of 0 would be the root inode, which is an error
-		}
-
-		// load parent dir
-		dir_block_t temp; // create temp variable to hold parent inode
-		if (back_store_read(fs->bs, traverse.parent_directory.data_ptrs[0], &temp) == false) { // read data from the back store
-			printf("FS_Create error: Could not read directory"); 
-			return -1;
-		}
-
-		bool added = add_inode_to_parent_dir(fs, temp, traverse, FS_REGULAR, open_inode, 0); // add file to the parent directory
-		if (added == false) return -1; // check to make sure that the file was added 
-
-	}
-
-	if (write_inode_array_to_backstore(fs) == false) return -1; // write the inode array to the back store
-	// set the filename, MD, and block pointers of the inode
-
-	return 0;
+                                                    if (!(success = full_write(fs, &new_dir, new_dir_ptr)
+                                                                    && write_inode(fs, &new_inode, new_inode_idx))) {
+                                                        // transation: if it didn't work, release the allocated block
+                                                        back_store_release(fs->bs, new_dir_ptr);
+                                                    }
+                                                }
+                                                break;
+                                            default:
+                                                // HOW.
+                                                break;
+                                        }
+                                        if (success) {
+                                            // whoops. forgot the part where I actually save the file to the dir tree
+                                            // Mildly important.
+                                            unsigned i = 0;
+                                            // This is technically a potential infinite loop. But we validated contents
+                                            // earlier
+                                            for (; parent_dir.entries[i].fname[0] != '\0'; ++i) {
+                                            }
+                                            strncpy(parent_dir.entries[i].fname, fname_copy, fname_len + 1);
+                                            parent_dir.entries[i].inode = new_inode_idx;
+                                            ++parent_dir.mdata.size;
+                                            if (full_write(fs, &parent_dir, file_status.block)) {
+                                                free(path_copy);
+                                                return 0;
+                                            } else {
+                                                // Oh man. These surely are the end times.
+                                                // Our file exists. Kinda. But not entirely.
+                                                // The final tree link failed.
+                                                // We SHOULD:
+                                                //  Wipe inode
+                                                //  Release dir block (if making a dir)
+                                                // But I'm lazy. And if a write failed, why would others work?
+                                                // back_store won't actually do that to us, anyway.
+                                                // Like, even if the file was deleted while using it, we're mmap'd so
+                                                // the kernel has no real way to tell us, as far as I know.
+                                                puts("Infinite sadness. New file stuck in limbo.");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        free(path_copy);
+                    }
+                }
+            }
+        }
+    }
+    return -1;
 }
 
-//// HELPER FUNCTIONS ////
+///
+/// Opens the specified file for use
+///   R/W position is set to the beginning of the file (BOF)
+///   Directories cannot be opened
+/// \param fs The S16FS containing the file
+/// \param path path to the requested file
+/// \return file descriptor to the requested file, < 0 on error
+///
+int fs_open(S16FS_t *fs, const char *path) {
+    if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) { // check params
+        printf("\nBad Parameters for fs_open");
+        return -1;
+    }
+    
+    result_t file_status;
+    locate_file(fs, path, &file_status);
 
-bool format_inode_table(S16FS_t *fs) {
-	if (!fs) return false; // param check
+    if (file_status.success) {
+    	if (file_status.found) {
+    		if (file_status.type == FS_REGULAR) {
+    			printf("\nThis is a good file!!!");
+    			// Find open inode
+    			// Fill with metadata
+    			// Return with the fd_table index as the fd 
+    		} else {
+    			printf("\nError with fs_open: the inode found is a directory, not a file");
+    			return -1;
+    		}
+    	} else {
+    		printf("\nError with fs_open: the file was not found from locate_file, but the function returned successfully");
+    		return -1;
+    	}
+    } else {
+    	printf("\nError with fs_open: locate_file function ran into an error");
+    	return -1;
+    }
 
-	fs->inode_array = (inode_t *)calloc(256, sizeof(inode_t)); // calloc memory for the inode array
-	if(!(fs->inode_array)) return false; // if the inode array has memory 
-
-	// requests all the blocks in the BS for the inode table
-	for (int block=8; block<40; ++block) { // Have to start at 8 because blocks 0-7 are the FBM in the backstore 	
-		if (back_store_request(fs->bs, block) != true) { // request blocks for the inode array
-			free(fs->inode_array);
-			return false;
-		}
-	}
-
-	block_ptr_t root_block = back_store_allocate(fs->bs); // allocate a block for the root directory
-	fs->inode_array[0] = (inode_t){"/",{0, FS_DIRECTORY, {}}, {root_block}}; // create the inode root
-	if (write_inode_array_to_backstore(fs) == false) { // write the root inode to the back store
-		free(fs->inode_array);
-		return false;
-	}
-
-	dir_block_t *root_dir = (dir_block_t *)calloc(1, sizeof(dir_block_t)); // calloc memory for the root directory
-	root_dir->mdata.type = FS_DIRECTORY; // set to directory
-	if (back_store_write(fs->bs, root_block, (void *)root_dir) == false) { // write root directory to the back store 
-		free(fs->inode_array);
-		return false;
-	}
-	free(root_dir);
-
-	return true;
+    return -1;
 }
 
-bool write_inode_array_to_backstore(S16FS_t *fs) {
-	if (!fs) return false; 
+///
+/// Closes the given file descriptor
+/// \param fs The S16FS containing the file
+/// \param fd The file to close
+/// \return 0 on success, < 0 on failure
+///
+int fs_close(S16FS_t *fs, int fd) {
+    if (!fs || fd < 3) {
+        printf("\nBad Parameters for fs_close");
+        return -1;
+    }
 
-	for (int i=0, block=8; i<256; i+=8, ++block) {
-		if (back_store_write(fs->bs, block, (void *)(fs->inode_array + i)) != true) { // write to back store 
-		 	printf("\nWRITE FAILED\n");
-		 	return false;
-		}
-	}
-	return true;
+    return -1;
 }
 
-bool read_inode_array_from_backstore(S16FS_t *fs) {
-	if (!fs) return false;
+///
+/// Writes data from given buffer to the file linked to the descriptor
+///   Writing past EOF extends the file
+///   Writing inside a file overwrites existing data
+///   R/W position in incremented by the number of bytes written
+/// \param fs The S16FS containing the file
+/// \param fd The file to write to
+/// \param dst The buffer to read from
+/// \param nbyte The number of bytes to write
+/// \return number of bytes written (< nbyte IFF out of space), < 0 on error
+///
+ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
+    if (!fs || fd < 3 || !src || !nbyte) {
+        printf("\nBad Parameters for fs_write");
+        return -1;
+    }
 
-	fs->inode_array = (inode_t *)calloc(256, sizeof(inode_t));
-	if(!(fs->inode_array)) return false;
-
-	for (int i=0, block=8; i<256; i+=8, ++block) {
-		if (back_store_read(fs->bs, block, (fs->inode_array + i)) != true) { // read inode array from back store
-		 	printf("\nREAD FAILED\n");
-		 	return false;
-		}
-	}
-	return true;
+    return 0;
 }
 
-int find_open_inode(S16FS_t *fs) {
-	if (!fs) return -1;
+///
+/// Deletes the specified file and closes all open descriptors to the file
+///   Directories can only be removed when empty
+/// \param fs The S16FS containing the file
+/// \param path Absolute path to file to remove
+/// \return 0 on success, < 0 on error
+///
+int fs_remove(S16FS_t *fs, const char *path) {
+    if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
+        printf("\nBad Parameters for fs_remove");
+        return -1;
+    }
 
-	inode_t *intbl = fs->inode_array;
-	for (int i = 0; i < DESCRIPTOR_MAX; ++i) {
-		if (!*(intbl + i)->fname) {
-			return i;
-		}
-	}
-
-	return -1;
+    return -1;
 }
 
-traversal_results_t tree_traversal(S16FS_t *fs, const char *path) {
-	// Set default return structure values
-	traversal_results_t results = {{}, {}, "", 0}; // set to the root
-	if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
-		printf("\nTraverse Error: Parameter Error");
-		results.error_code = -1;
-		return results;
-	}
+///
+/// Moves the R/W position of the given descriptor to the given location
+///   Files cannot be seeked past EOF or before BOF (beginning of file)
+///   Seeking past EOF will seek to EOF, seeking before BOF will seek to BOF
+/// \param fs The S16FS containing the file
+/// \param fd The descriptor to seek
+/// \param offset Desired offset relative to whence
+/// \param whence Position from which offset is applied
+/// \return offset from BOF, < 0 on error
+///
+off_t fs_seek(S16FS_t *fs, int fd, off_t offset, seek_t whence);
 
-	if (*path != '/') { // check that the beginning is the root directory
-		printf("\nTraverse Error: Path must start with '/' character");
-		results.error_code = -1;
-		return results;
-	}
+///
+/// Reads data from the file linked to the given descriptor
+///   Reading past EOF returns data up to EOF
+///   R/W position in incremented by the number of bytes read
+/// \param fs The S16FS containing the file
+/// \param fd The file to read from
+/// \param dst The buffer to write to
+/// \param nbyte The number of bytes to read
+/// \return number of bytes read (< nbyte IFF read passes EOF), < 0 on error
+///
+ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte);
 
-	if (*(path + strlen(path)-1) == '/') { // check that the end is not a / 
-		printf("\nTraverse Error: Path cannot end with a '/' character");
-		results.error_code = -1;
-		return results;
-	}
+///
+/// Populates a dyn_array with information about the files in a directory
+///   Array contains up to 15 file_record_t structures
+/// \param fs The S16FS containing the file
+/// \param path Absolute path to the directory to inspect
+/// \return dyn_array of file records, NULL on error
+///
+dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path);
 
-	results.parent_directory = *fs->inode_array;
-
-	// Declare current directory
-	dir_block_t dir;
-	if (back_store_read(fs->bs, results.parent_directory.data_ptrs[0], &dir) == false) {
-		printf("\nTraverse Error: read to first directory failed");
-		results.error_code = -1;
-		return results;
-	}
-
-	const size_t str_length = strlen(path); // the length of the string to duplicate
-	char *new_path = strndup(path, str_length); // duplicated string casting from const char* to char*
-	
-
-	char *token; // the "next" token
-	char *previous_token; // the directory that we were just at
-	inode_ptr_t current_inode_index; // the inode index if found in the directory block
-	uint8_t file_type = dir.mdata.type;
-	token = strtok(new_path, "/"); // get the first token
-
-	if (token) {
-		if (strlen(token) >= 64) {
-			printf("\nTraverse Error: Filename too long ---> %s\n", token);
-			results.error_code = 3;
-			free (new_path);
-			return results;
-		}
-	}
-
-	while (token != NULL) {
-
-		previous_token = token; 
-		token = strtok(NULL, "/"); // check that there is another path to search for 
-
-		if (token != NULL) {
-
-			// Make sure that the next token is within the 64 character constraint
-			if (strlen(token) >= 64) {
-				printf("\nTraverse Error: Filename too long ---> %s\n", token);
-				results.error_code = 3;
-				free(new_path);
-				return results;
-			}
-
-			// Search for filename in the current directory's directory block
-			bool found = false;
-
-			// for loop through directory to search for filename in current directory
-			for (int i = 0; i < DIR_REC_MAX; ++i) {
-				//printf("\nI: %d\nPREV: %s\nDIR: %s\n", i, previous_token, dir.entries[i].fname);
-				if (strcmp(previous_token, dir.entries[i].fname) == 0) {
-					found = true;
-					current_inode_index = dir.entries[i].inode;
-					break;
-				}
-			}
-
-			if (found == false) { // if the file was not found
-				printf("\nError in traversing tree:  File not Found in the Current Directory");
-				results.error_code = 1;
-				free(new_path);
-				return results;
-			} else { // if the file was found 
-				if (file_type == FS_DIRECTORY) { // if file type is directory AND there IS more tokenizing to do
-					// load current directory to
-					if (back_store_read(fs->bs, (fs->inode_array + current_inode_index)->data_ptrs[0], &dir) == false) {
-						printf("\nTraverse Error: read to next directory failed");
-						results.error_code = -1;
-						free(new_path);
-						return results;
-					}
-
-					results.parent_directory = *(fs->inode_array + current_inode_index);
-
-					file_type = dir.mdata.type;
-				} else if (file_type == FS_REGULAR) { // if file type is regular AND there IS more tokenizing to do 
-					printf("\nError in Traversing File: Reached a file but not done traversing tree");
-					results.error_code = 1;
-					free(new_path);
-					return results;
-				}
-			}
-		} else { // 
-			bool found = false;
-
-			for (int i = 0; i < DIR_REC_MAX; ++i) { // search for the file 
-				if (strcmp(previous_token, dir.entries[i].fname) == 0) { 
-					found = true;
-					current_inode_index = i;
-					break;
-				}
-			}
-
-			if (found != false) { // if the file was not found 
-				printf("Traverse Tree Error:  File/Directory Already exists");
-				results.error_code = 1;
-				free(new_path);
-				return results;
-			} else {
-				if (file_type == FS_REGULAR) { // file type is regular AND there is NOT more tokenizing to do
-					// return the current inode number and the parent inode number
-					strcpy(results.fname,previous_token);
-					return results;
-				} else { // else unknown error
-					//printf("\nUnknown error in traversing file tree\n");
-					//results.error_code = -1;
-					strcpy(results.fname,previous_token);
-					free(new_path);
-					return results;
-				}
-			}
-		}
-	}
-	free(new_path);
-
-	printf("\nUnexpected Error in traversing tree, reached end of function...");
-	results.error_code = -1;
-	return results;
-}
-
-bool add_inode_to_parent_dir(S16FS_t *fs, dir_block_t temp, traversal_results_t traverse, uint8_t type, int open_inode, block_ptr_t root_block) {
-	bool added = false; 
-	for (int i=0; i<DIR_REC_MAX; ++i) { // check to see if the directory has an open spot 
-
-		if (strlen(temp.entries[i].fname) == 0) { 
-			strcpy(temp.entries[i].fname, traverse.fname);
-			temp.entries[i].inode = open_inode;
-			added = true; 
-			break;
-		}
-	}
-
-	if (added == false) {
-		printf("FS_Create error: NO room in the directory to add file!");
-		return false;
-	} else { 
-		if (back_store_write(fs->bs, traverse.parent_directory.data_ptrs[0], (void *)&(temp)) == false) { // write the data block of the parent directory
-			printf("Could not add file to directory");
-			return false;
-		}
-	}
-	if (type == FS_DIRECTORY) {
-		fs->inode_array[open_inode] = (inode_t){"",{0, type, {}}, {root_block}}; // create the inode for the directory
-	} else {
-		fs->inode_array[open_inode] = (inode_t){"",{0, type, {}}, {}}; // create the inode for the file 
-	}
-	strcpy(fs->inode_array[open_inode].fname,traverse.fname);
-	return true;
-}
+///
+/// !!! Graduate Level/Undergrad Bonus !!!
+/// !!! Activate tests from the cmake !!!
+///
+/// Moves the file from one location to the other
+///   Moving files does not affect open descriptors
+/// \param fs The S16FS containing the file
+/// \param src Absolute path of the file to move
+/// \param dst Absolute path to move the file to
+/// \return 0 on success, < 0 on error
+///
+int fs_move(S16FS_t *fs, const char *src, const char *dst);

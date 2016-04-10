@@ -212,7 +212,14 @@ int fs_create(S16FS_t *fs, const char *path, file_t type) {
 /// \param path path to the requested file
 /// \return file descriptor to the requested file, < 0 on error
 ///
-int fs_open(S16FS_t *fs, const char *path);
+int fs_open(S16FS_t *fs, const char *path) {
+    if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) { // check params
+        printf("\nBad Parameters for fs_open");
+        return -1;
+    }
+
+    return -1;
+}
 
 ///
 /// Closes the given file descriptor
@@ -220,7 +227,14 @@ int fs_open(S16FS_t *fs, const char *path);
 /// \param fd The file to close
 /// \return 0 on success, < 0 on failure
 ///
-int fs_close(S16FS_t *fs, int fd);
+int fs_close(S16FS_t *fs, int fd) {
+    if (!fs || fd < 3) {
+        printf("\nBad Parameters for fs_close");
+        return -1;
+    }
+
+    return -1;
+}
 
 ///
 /// Writes data from given buffer to the file linked to the descriptor
@@ -233,7 +247,14 @@ int fs_close(S16FS_t *fs, int fd);
 /// \param nbyte The number of bytes to write
 /// \return number of bytes written (< nbyte IFF out of space), < 0 on error
 ///
-ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte);
+ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
+    if (!fs || fd < 3 || !src || !nbyte) {
+        printf("\nBad Parameters for fs_write");
+        return -1;
+    }
+
+    return 0;
+}
 
 ///
 /// Deletes the specified file and closes all open descriptors to the file
@@ -242,7 +263,14 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte);
 /// \param path Absolute path to file to remove
 /// \return 0 on success, < 0 on error
 ///
-int fs_remove(S16FS_t *fs, const char *path);
+int fs_remove(S16FS_t *fs, const char *path) {
+    if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
+        printf("\nBad Parameters for fs_remove");
+        return -1;
+    }
+
+    return -1;
+}
 
 ///
 /// Moves the R/W position of the given descriptor to the given location
