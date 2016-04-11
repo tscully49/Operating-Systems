@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <stdio.h>
 
 // typedef enum { FS_SEEK_SET, FS_SEEK_CUR, FS_SEEK_END } seek_t;
 
@@ -136,14 +137,7 @@ struct S16FS {
 
 typedef struct { block_ptr_t block_ptrs[INDIRECT_TOTAL]; } indir_block_t;
 
-/*
-typedef struct {
-    // You can add more if you want
-    // vvv just don't remove or rename these vvv
-    char[FS_FNAME_MAX] name;
-    file_t type;
-} file_record_t;
-*/
+
 
 // completely generic structure with a smattering of types
 // functions that use it say what they fill out
@@ -191,5 +185,8 @@ void scan_directory(const S16FS_t *const fs, const char *fname, const inode_ptr_
 inode_ptr_t find_free_inode(const S16FS_t *const fs);
 
 S16FS_t *ready_file(const char *path, const bool format);
+
+bool dir_is_empty(const S16FS_t *const fs, dir_block_t *dir);
+dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t file);
 
 #endif

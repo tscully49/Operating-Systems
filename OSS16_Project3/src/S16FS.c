@@ -226,8 +226,18 @@ int fs_open(S16FS_t *fs, const char *path) {
     		if (file_status.type == FS_REGULAR) {
     			printf("\nThis is a good file!!!");
     			// Find open inode
-    			// Fill with metadata
-    			// Return with the fd_table index as the fd 
+    			size_t open_fd = bitmap_ffz(fs->fd_table.fd_status);
+    			if (open_fd == SIZE_MAX) {
+    				printf("\nError with fs_open: out of available fd numbers");
+    				return -1;
+    			} else {
+    				// Fill with metadata
+    				bitmap_set(fs->fd_table.fd_status, open_fd);
+    				fs->fd_table.fd_inode[open_fd] = file_status.inode;
+    				fs->fd_table.fd_pos[open_fd] = 0;
+    				// Return with the fd_table index as the fd
+    				return open_fd;
+    			} 
     		} else {
     			printf("\nError with fs_open: the inode found is a directory, not a file");
     			return -1;
@@ -251,9 +261,17 @@ int fs_open(S16FS_t *fs, const char *path) {
 /// \return 0 on success, < 0 on failure
 ///
 int fs_close(S16FS_t *fs, int fd) {
-    if (!fs || fd < 3) {
+    if (!fs || !fd || fd < 0) {
         printf("\nBad Parameters for fs_close");
         return -1;
+    }
+
+    if (bitmap_test(fs->fd_table.fd_status, fd) == false) {
+    	printf("\nfs_close Error: Cannot close that fd, the fd is not currently in use");
+    	return -1;
+    } else {
+    	bitmap_reset(fs->fd_table.fd_status, fd);
+		return 0;
     }
 
     return -1;
@@ -276,6 +294,8 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
         return -1;
     }
 
+
+
     return 0;
 }
 
@@ -290,6 +310,84 @@ int fs_remove(S16FS_t *fs, const char *path) {
     if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) {
         printf("\nBad Parameters for fs_remove");
         return -1;
+    }
+
+    result_t file_status;
+    locate_file(fs, path, &file_status);
+
+    if (file_status.success) {
+    	if (file_status.found) {
+    		if (file_status.type == FS_REGULAR) {
+    			// reset bits in bitmap from FBM for the datablocks from the pointers in the inode
+    				// need to make sure to clear the indirect and double indirect
+
+    			// remove the metadata from them 
+
+    			// change the filename to NULL or 0
+
+    			// remove the inode from the parent directory
+
+    			// write parent_dir block back to BS from memory
+
+    			// return 0
+    		} else if (file_status.type == FS_DIRECTORY) {
+    			// check to see if directory is empty or not 
+    			dir_block_t temp_dir;
+
+    			back_store_read(fs->bs, file_status.block, &temp_dir);
+
+    			bool is_empty = dir_is_empty(fs, &temp_dir);
+    			// if empty 
+    			if (is_empty == true) {
+    				// clear the block holding the dir_block 
+    				back_store_release(fs->bs, file_status.block);
+    				// clear inode and write to BS
+    				clear_inode(fs, file_status.block);
+    				// remove from parent directory 
+    				inode_t parent_inode;
+    				read_inode(fs, &parent_inode, file_status.parent);
+
+    				dir_block_t parent_dir;
+    				back_store_read(fs->bs, parent_inode.data_ptrs[0], &parent_dir);
+
+    				inode_t found_inode;
+    				read_inode(fs, &found_inode, file_status.inode);
+
+    				bool is_found = false;
+    				for(int i=0; i<DIR_REC_MAX; ++i) {
+    					if (strcmp(parent_dir.entries[i].fname, found_inode.fname) == 0) {
+    						parent_dir.entries[i].fname[0] = '\0';
+    						is_found = true;
+    						break;
+    					}
+    				}
+    				if (is_found == false) {
+    					printf("\nError with fs_remove: The directory to be deleted was not found in the parent dir");
+    					return -1;
+    				}
+    				// Write parent dir back to BS from memory
+    				if (full_write(fs, (void *)&parent_dir, parent_inode.data_ptrs[0]) == true) {
+	    				// return 0
+	    				return 0;
+	    			} else {
+	    				printf("\nError with fs_remove: The parent_dir could not be written to the bs");
+	    				return -1;
+	    			}
+    			} else { // else 
+    				printf("Error with fs_remove: The directory requested to be remove is not empty");
+    				return -1;
+    			}
+    		} else {
+    			printf("\nError with fs_remove: the inode found is a directory, not a file");
+    			return -1;
+    		}
+    	} else {
+    		printf("\nError with fs_remove: the file was not found from locate_file, but the function returned successfully");
+    		return -1;
+    	}
+    } else {
+    	printf("\nError with fs_remove: locate_file function ran into an error");
+    	return -1;
     }
 
     return -1;

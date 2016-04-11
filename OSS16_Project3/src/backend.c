@@ -287,3 +287,44 @@ inode_ptr_t find_free_inode(const S16FS_t *const fs) {
     }
     return 0;
 }
+
+bool dir_is_empty(const S16FS_t *const fs, dir_block_t *dir) {
+    if (!fs || !dir) return false;
+
+    for (int i = 0; i < DIR_REC_MAX; ++i) {
+        if (dir->entries[i].fname[0] != '\0') {
+            return false;
+        }
+    }
+    return true;
+}
+
+dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t file) {
+    if (!fs || !file) return NULL;
+
+    inode_t inode;
+    if (read_inode(fs, &inode, file) != true) {
+        printf("\nError with building data ptr array: could not read inode");
+        return NULL;
+    }
+
+    dyn_array_t *blocks_array = dyn_array_create(0,sizeof(block_ptr_t),NULL);
+
+    for (int i=0; i<6; ++i) { // this gets the 6 direct pointers, then move onto indirect and double indirect
+        if (inode.data_ptrs[i] != 0) {
+            if (dyn_array_push_back(blocks_array, (void *)&(inode.data_ptrs[i])) != true) {
+                printf("\nError with building data ptr array: could not add to array");
+                dyn_array_destroy(blocks_array);
+                return NULL;
+            }
+        }
+    }
+
+    // add indirect
+
+    // add double indirect
+
+
+
+    return blocks_array;
+}
