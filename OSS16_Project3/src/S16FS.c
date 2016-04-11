@@ -320,16 +320,58 @@ int fs_remove(S16FS_t *fs, const char *path) {
     		if (file_status.type == FS_REGULAR) {
     			// reset bits in bitmap from FBM for the datablocks from the pointers in the inode
     				// need to make sure to clear the indirect and double indirect
+    			dyn_array_t *data_blocks_in_file = build_array_of_file_data_ptrs(fs, file_status.inode);
+    			if (data_blocks_in_file == NULL) {
+    				printf("\nError in fs_remove: 'build array of file data ptrs' function failed");
+    				dyn_array_destroy(data_blocks_in_file);
+    				return -1;
+    			}
 
-    			// remove the metadata from them 
-
+    			while (dyn_array_empty(data_blocks_in_file) == false) {
+    				block_ptr_t temp;
+    				if (dyn_array_extract_back(data_blocks_in_file, &temp) == false) {
+    					printf("\nError in fs_remove: could not extract from dyn array");
+	    				dyn_array_destroy(data_blocks_in_file);
+	    				return -1;
+	    			}
+    				back_store_release(fs->bs, temp);
+    			}
     			// change the filename to NULL or 0
+    			if (clear_inode(fs, file_status.inode) == false) {
+					printf("\nError in fs_remove: clear_inode function failec");
+					return -1;
+				}
 
     			// remove the inode from the parent directory
+				inode_t parent_inode;
+				read_inode(fs, &parent_inode, file_status.parent);
 
-    			// write parent_dir block back to BS from memory
+				dir_block_t parent_dir;
+				back_store_read(fs->bs, parent_inode.data_ptrs[0], &parent_dir);
 
-    			// return 0
+				inode_t found_inode;
+				read_inode(fs, &found_inode, file_status.inode);
+
+				bool is_found = false;
+				for(int i=0; i<DIR_REC_MAX; ++i) {
+					if (strcmp(parent_dir.entries[i].fname, found_inode.fname) == 0) {
+						parent_dir.entries[i].fname[0] = '\0';
+						is_found = true;
+						break;
+					}
+				}
+				if (is_found == false) {
+					printf("\nError with fs_remove: The directory to be deleted was not found in the parent dir");
+					return -1;
+				}
+				// Write parent dir back to BS from memory
+				if (full_write(fs, (void *)&parent_dir, parent_inode.data_ptrs[0]) == true) {
+    				// return 0
+    				return 0;
+    			} else {
+    				printf("\nError with fs_remove: The parent_dir could not be written to the bs");
+    				return -1;
+    			}
     		} else if (file_status.type == FS_DIRECTORY) {
     			// check to see if directory is empty or not 
     			dir_block_t temp_dir;
@@ -342,7 +384,10 @@ int fs_remove(S16FS_t *fs, const char *path) {
     				// clear the block holding the dir_block 
     				back_store_release(fs->bs, file_status.block);
     				// clear inode and write to BS
-    				clear_inode(fs, file_status.block);
+    				if (clear_inode(fs, file_status.inode) == false) {
+    					printf("\nError in fs_remove: clear_inode function failec");
+    					return -1;
+    				}
     				// remove from parent directory 
     				inode_t parent_inode;
     				read_inode(fs, &parent_inode, file_status.parent);

@@ -321,10 +321,54 @@ dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t 
     }
 
     // add indirect
+    if (inode.data_ptrs[6] != 0) {
+        indir_block_t first_indirect_block;
+        if (full_read(fs, &first_indirect_block, inode.data_ptrs[6]) != true) {
+            printf("\nError with building data ptr array: could not read first indirect pointer block");
+            dyn_array_destroy(blocks_array);
+            return NULL;
+        }
 
+        for (size_t i=0; i<INDIRECT_TOTAL; ++i) {
+            if (first_indirect_block.block_ptrs[i] != 0) {
+                if (dyn_array_push_back(blocks_array, (void *)&(first_indirect_block.block_ptrs[i])) != true) {
+                    printf("\nError with building data ptr array: could not add to array");
+                    dyn_array_destroy(blocks_array);
+                    return NULL;
+                }
+            }
+        }
+    }
     // add double indirect
+    if (inode.data_ptrs[7] != 0) {
+        indir_block_t double_indirect;
+        if (full_read(fs, &double_indirect, inode.data_ptrs[7]) != true) {
+            printf("\nError with building data ptr array: could not read first indirect pointer block");
+            dyn_array_destroy(blocks_array);
+            return NULL;
+        }
 
+        for (size_t i=0; i<INDIRECT_TOTAL; ++i) {
+            if (double_indirect.block_ptrs[i] != 0) {
+                indir_block_t indirect_block;
+                if (full_read(fs, &indirect_block, double_indirect.block_ptrs[i]) != true) {
+                    printf("\nError with building data ptr array: could not read first indirect pointer block");
+                    dyn_array_destroy(blocks_array);
+                    return NULL;
+                }
 
+                for (size_t j=0; j<INDIRECT_TOTAL; ++j) {
+                    if (indirect_block.block_ptrs[j] != 0) {
+                        if (dyn_array_push_back(blocks_array, (void *)&(indirect_block.block_ptrs[j])) != true) {
+                            printf("\nError with building data ptr array: could not add to array");
+                            dyn_array_destroy(blocks_array);
+                            return NULL;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     return blocks_array;
 }
