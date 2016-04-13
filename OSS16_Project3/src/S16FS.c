@@ -294,9 +294,60 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
         return -1;
     }
 
+    size_t num_blocks = nbyte / BLOCK_SIZE; // finds the number of blocks needed to write to the inode
+    if (nbyte % BLOCK_SIZE != 0) num_blocks++; // if not perfectly divisible, you will need an extra block
+
+    size_t blocks_written = 0;
+    inode_t file_inode;
+    if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
+    	printf("\nError with fs_write: Could not read inode of file from fd");
+    	return -1;
+    }
+
+    uint32_t curr_size_of_file = file_inode.mdata.size; // current size of file in bytes
 
 
-    return 0;
+    size_t fd_pos = fs->fd_table.fd_pos[fd]; // current 
+    size_t fd_pos_block = fd_pos/BLOCK_SIZE; // don't add 1 if not a clean division
+    bool start_of_block = fd_pos%BLOCK_SIZE == 0; 
+
+    if (fd_pos + nbyte > FILE_SIZE_MAX) {
+    	printf("\nError with fs_write: Trying to extend file past the maximum file size");
+    	return -1;
+    }
+
+    // build dyn array of data blocks written to 
+
+    while (num_blocks > 0) {
+       	if (fd_pos <= 5) { // direct pointers 
+       		// write to direct blocks
+       		// add to dyn_array
+       		// bump the blocks written and fd_pos each time
+    	} else if (fd_pos >= 6) { // indirect pointers
+    		// write to indirect blocks
+    		// add indirect block if doesn't exist
+    		// add to dyn_array
+    		// bump the blocks written and fd_pos each time
+    	} else if (fd_pos >= 518) { // double indirect pointers
+    		// write to double indirect blocks 
+    		// add to dyn_array
+    		// add double indirect block or direct blocks if doesn't exist
+    		// bump the blocks written and fd_pos each time
+    	} else if (fd_pos >= 262662) {
+    		printf("\nError with fs_write: Trying to extend file past the maximum file size");
+    		return -1;
+    	}
+
+    	num_blocks--;
+    }
+
+    // If this point is reaches, assume that the file writing completed successfully
+
+    // iterate through dyn_array and update the inode block pointers 
+
+    // increase the size of the file and bump the size mdata of the file
+
+    return blocks_written;
 }
 
 ///
