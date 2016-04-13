@@ -423,20 +423,132 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     	} else if (fd_pos_block >= 6) { // indirect pointers
     		if (file_inode.data_ptrs[6] == 0) {
     			// add the indirect block
-    		} else {
+    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
+    			if (new_block == 0) {
+    				printf("\nfs_write error: No room to add the indirect pointer block");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+
+    			indir_block_t indirect_block;
+    			memset(&indirect_block, 0, sizeof(indir_block_t));
+
+    			indirect_block.block_ptrs[0] = temp;
+
+    			if (full_write(fs, (void *)&indirect_block, new_block) != true) {
+    				printf("\nfs_write error: could not write indirect block to bs");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+     		} else {
     			// go to block and add to it
+    			indir_block_t indirect_block;
+    			full_read(fs, &indirect_block, file_inode.data_ptrs[6]);
+
+    			indirect_block.block_ptrs[fd_pos_block-6] = temp;
+
+    			if (full_write(fs, (void *)&indirect_block, file_inode.data_ptrs[6]) != true) {
+    				printf("\nfs_write error: could not write indirect block to bs");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
     		}
     	} else if (fd_pos_block >= 518) { // double indirect pointers
     		if (file_inode.data_ptrs[7] == 0) {
     			// add the double indirect block
+    			block_ptr_t new_dbl_block = (block_ptr_t)back_store_allocate(fs->bs);
+    			if (new_dbl_block == 0) {
+    				printf("\nfs_write error: No room to add the double indirect pointer block");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+
+    			indir_block_t double_indirect_block;
+    			memset(&double_indirect_block, 0, sizeof(indir_block_t));
+
+    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
+    			if (new_block == 0) {
+    				printf("\nfs_write error: No room to add the indirect pointer block");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+
+    			double_indirect_block.block_ptrs[0] = new_block;
+
+    			if (full_write(fs, (void *)&double_indirect_block, new_dbl_block) != true) {
+    				printf("\nfs_write error: could not write indirect block to bs");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+
+    			indir_block_t indirect_block;
+    			memset(&indirect_block, 0, sizeof(indir_block_t));
+
+    			indirect_block.block_ptrs[0] = temp;
+
+    			if (full_write(fs, (void *)&indirect_block, new_dbl_block) != true) {
+    				printf("\nfs_write error: could not write indirect block to bs");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
     		} else {
-    			// go to block and check that all the indirect blocks are there
-    			
+    			// find which indirect pointer in the double indirect block we are going into
+    			size_t double_indirect_index = (fd_pos_block-518)/INDIRECT_TOTAL;
+
+    			indir_block_t double_indirect_block;
+    			if (full_read(fs, &double_indirect_block, file_inode.data_ptrs[7]) != true) {
+    				printf("\nfs_write error: could not read double indirect pointer");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
+
+    			if (double_indirect_block.block_ptrs[double_indirect_index] == 0) { // if doesn't
+    				// create the indirect block and set the 0th element to the temp 
+    				// add the indirect block
+	    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
+	    			if (new_block == 0) {
+	    				printf("\nfs_write error: No room to add the indirect pointer block");
+	    				dyn_array_destroy(data_blocks_written_to);
+	    				return -1;
+	    			}
+
+	    			indir_block_t indirect_block;
+	    			memset(&indirect_block, 0, sizeof(indir_block_t));
+
+	    			indirect_block.block_ptrs[0] = temp;
+
+	    			if (full_write(fs, (void *)&indirect_block, new_block) != true) {
+	    				printf("\nfs_write error: could not write indirect block to bs");
+	    				dyn_array_destroy(data_blocks_written_to);
+	    				return -1;
+	    			}
+
+	    			double_indirect_block.block_ptrs[double_indirect_index] = new_block;
+
+	    			if (full_write(fs, (void *)&double_indirect_block, file_inode.data_ptrs[7]) != true) {
+	    				printf("\nfs_write error: could not write indirect block to bs");
+	    				dyn_array_destroy(data_blocks_written_to);
+	    				return -1;
+	    			}
+    			} else { // else 
+    				// find which index in that indirect block you are using
+    				size_t indirect_index = fd_pos_block - double_indirect_index;
+    				// set that index = temp 
+    				indir_block_t indirect_block;
+    				if (full_read(fs, &indirect_block, double_indirect_block.block_ptrs[double_indirect_index]) != true) {
+	    				printf("\nfs_write error: could not read double indirect pointer");
+	    				dyn_array_destroy(data_blocks_written_to);
+	    				return -1;
+	    			}
+
+	    			///////////////////////////////////////////////////////////////////////////////////////////
+    			}
     		}
     	} else if (fd_pos_block >= 262662) {
     		printf("\nError with fs_write: Trying to extend file past the maximum file size");
     		return -1;
     	}
+
     	fd_pos_block++;
     }
 
