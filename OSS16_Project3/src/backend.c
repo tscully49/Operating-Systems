@@ -28,7 +28,9 @@ bool partial_write(S16FS_t *fs, const void *data, const block_ptr_t block, const
         // Scratch that, return false. If it actually happens, it should be reported
         data_block_t buffer;
         if (back_store_read(fs->bs, block, &buffer)) {
-            memcpy(&buffer + offset, data, bytes);
+            printf("\n%zu\n%zu\n%zu\n", offset, bytes, sizeof(data));
+            memcpy(&buffer[offset], data, bytes);
+            printf("\nPARTIAL WRITE\n");
             return back_store_write(fs->bs, block, &buffer);
         }
     }
@@ -300,7 +302,10 @@ bool dir_is_empty(const S16FS_t *const fs, dir_block_t *dir) {
 }
 
 dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t file) {
-    if (!fs || !file) return NULL;
+    if (!fs || !file) {
+        printf("\nerror: bad params");
+        return NULL;
+    }
 
     inode_t inode;
     if (read_inode(fs, &inode, file) != true) {
@@ -371,4 +376,336 @@ dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t 
     }
 
     return blocks_array;
+}
+
+dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, const void *src, int fd, size_t nbyte, size_t *bytes_written, size_t *blocks_written) {
+    // build dyn array of data blocks written to 
+    inode_t file_inode;
+    if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
+        printf("\nerror: Could not read inode of file from fd");
+        return NULL;
+    }
+
+    dyn_array_t *data_blocks_written_to = dyn_array_create(0,sizeof(block_ptr_t),NULL);
+    size_t fd_pos = fs->fd_table.fd_pos[fd]; // current 
+    size_t fd_pos_block = fd_pos/BLOCK_SIZE;
+    bool start_of_block = fd_pos%BLOCK_SIZE == 0;
+
+    while (*blocks_written < num_blocks_to_write) {
+        if (fd_pos_block >= 262662) {
+            printf("\nerror: Trying to extend file past the maximum file size");
+            dyn_array_destroy(data_blocks_written_to);
+            return NULL;
+        }
+
+        if (*blocks_written == 0 && start_of_block == false) {
+
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+
+            if (new_block == 0) {
+                new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                printf("\nUH OH: ---> %zu\n", new_block);
+                if (new_block == 0) {
+                    printf("\nerror: NO ROOM to allocate new block");
+                    return data_blocks_written_to;
+                }
+            }
+            // calculate offset
+            size_t offset = fd_pos - (fd_pos_block*BLOCK_SIZE);
+            size_t num_bytes = BLOCK_SIZE-offset;
+
+            //printf("\noffset: %zu\nnum_bytes: %zu\n", offset, num_bytes);
+            // write to block in bs (partial write???)
+            if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
+                printf("\nerror: can't partial write");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+            // add to dyn_array
+            if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
+                printf("\nerror: cannot push to back of array");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+
+            *bytes_written += num_bytes;
+            // increment the void pointer only by however many bytes are used... 
+            src = INCREMENT_VOID(src, num_bytes);
+        } else if (*blocks_written == 0 && start_of_block == true && nbyte < BLOCK_SIZE) {
+            // read block # to local variable
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+
+            if (new_block == 0) {
+                new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                printf("\nUH OH: ---> %zu\n", new_block);
+                if (new_block == 0) {
+                    printf("\nerror: NO ROOM to allocate new block");
+                    return data_blocks_written_to;
+                }
+            }
+            // calculate offset
+            size_t offset = 0;
+            size_t num_bytes = nbyte;
+            // write to block in bs (partial write???)
+            if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
+                printf("\nerror: cannot partial writeee");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+            // add to dyn_array
+            if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
+                printf("\nerror: cannot push to backkkk of array");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+
+            *bytes_written += num_bytes;
+            // increment the void pointer only by however many bytes are used... 
+            src = INCREMENT_VOID(src, num_bytes);
+        } else if (*blocks_written == 0 && start_of_block == true && nbyte >= BLOCK_SIZE) {
+            
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+
+            if (new_block == 0) {
+                new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                printf("\nUH OH: ---> %zu\n", new_block);
+                if (new_block == 0) {
+                    printf("\nerror: NO ROOM to allocate new block");
+                    return data_blocks_written_to;
+                }
+            }
+
+            // write to block in bs (partial write???)
+            if (full_write(fs, src, new_block) != true) {
+                printf("\nerror: cannot full write 2");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+            // add to dyn_array
+            if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
+                printf("\nerror: cannot push to back 2");
+                dyn_array_destroy(data_blocks_written_to);
+                return NULL;
+            }
+
+            *bytes_written += BLOCK_SIZE;
+            // increment the void pointer only by however many bytes are used... 
+            src = INCREMENT_VOID(src, BLOCK_SIZE);
+        } else {
+            if (*blocks_written == num_blocks_to_write-1 && (fd_pos + nbyte)%BLOCK_SIZE != 0) { // if the last block of data doesn't fill up the entire block
+               
+                block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+
+                if (new_block == 0) {
+                    new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                    printf("\nUH OH: ---> %zu\n", new_block);
+                    if (new_block == 0) {
+                        printf("\nerror: NO ROOM to allocate new block");
+                        return data_blocks_written_to;
+                    }
+                }
+
+                // calculate offset
+                size_t offset = 0;
+                size_t num_bytes = (fd_pos + nbyte)-(BLOCK_SIZE*fd_pos_block);
+                // write to block in bs (partial write???)
+                if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
+                    dyn_array_destroy(data_blocks_written_to);
+                    printf("\nerror: partial write failed");
+                    return NULL;
+                }
+                // add to dyn_array
+                if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
+                    dyn_array_destroy(data_blocks_written_to);
+                    printf("\nerror: push to back of array failed");
+                    return NULL;
+                }
+
+                *bytes_written += num_bytes;
+                // increment the void pointer only by however many bytes are used... 
+                src = INCREMENT_VOID(src, num_bytes);
+            } else {
+                // find new block and (allocate???) ir wait until adding to data_ptrs
+                
+                block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+
+                if (new_block == 0) {
+                    new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                    printf("\nUH OH: ---> %zu\n", new_block);
+                    if (new_block == 0) {
+                        printf("\nError in fs_Write: NO ROOM to allocate new block");
+                        return data_blocks_written_to;
+                    }
+                }
+
+                //printf("\nBLOCK: %zu, fd_block: %zu  num to write: %zu", new_block, fd_pos_block, num_blocks_to_write);
+
+                // write to block (full write???)
+                if (full_write(fs, src, new_block) != true) {
+                    printf("\nerror: error with full_Write");
+                    dyn_array_destroy(data_blocks_written_to);
+                    return NULL;
+                }
+
+                // add to dyn_array
+                if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
+                    printf("\nerror: error with push to dyn array back");
+                    dyn_array_destroy(data_blocks_written_to);
+                    return NULL;
+                }
+
+                *bytes_written += BLOCK_SIZE;
+                // Increment void pointer for src
+                src = INCREMENT_VOID(src, BLOCK_SIZE);
+            }
+        }
+
+        *blocks_written += 1;
+        fd_pos_block++;
+    }
+    //printf("\nEND OF FUNCTION ---> BYTES: %u\n", *blocks_written);
+    printf("\nDONE");
+    return data_blocks_written_to;
+}
+
+block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *data_blocks_written_to) {
+    if (!data_blocks_written_to) return 0;
+    inode_t file_inode;
+    if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
+        printf("\nerror: Could not read inode of file from fd");
+        return 0;
+    }
+
+    printf("\nFD_POS: %zu", fd_pos_block);
+    block_ptr_t new_block = 0;
+
+    if (fd_pos_block <= 5) { // direct pointers
+        new_block = file_inode.data_ptrs[fd_pos_block];
+    } else if (fd_pos_block >= 6 && fd_pos_block < 518) {
+        if (file_inode.data_ptrs[6] == 0) {
+            new_block = (block_ptr_t)back_store_allocate(fs->bs);
+            printf("\nINDIR BLOCK: ---> %zu\n", new_block);
+            if (new_block == 0) {
+                printf("\nfs_write error: Nope room to add the indirect pointer block");
+                return 0;
+            }
+
+            indir_block_t indirect_block;
+            memset(&indirect_block, 0, sizeof(indir_block_t));
+
+            if (full_write(fs, (void *)&indirect_block, new_block) != true) {
+                printf("\nfs_write error: could not write indirect block to bs");
+                return 0;
+            }
+
+            file_inode.data_ptrs[6] = new_block;
+
+            if (write_inode(fs, (void *)&file_inode, fs->fd_table.fd_inode[fd]) != true) {
+                printf("\nfs_write error: Could not write inode to BS");
+                return 0;
+            }
+
+            new_block = 0;
+        } else {
+            indir_block_t temp;
+            if (full_read(fs, &temp, file_inode.data_ptrs[6]) != true) {
+                printf("\nerror: could not read indirect pointer");
+                return 0;
+            }
+            new_block = temp.block_ptrs[fd_pos_block-6];
+        }
+    } else if (fd_pos_block >= 518) {
+        if (file_inode.data_ptrs[7] == 0) {
+            block_ptr_t new_dbl_block = (block_ptr_t)back_store_allocate(fs->bs);
+            if (new_dbl_block == 0) {
+                printf("\nfs_write error: Noo room to add the double indirect pointer block");
+                return 0;
+            }
+            printf("\nDBL INDIR BLOCK: ---> %zu\n", new_dbl_block);
+
+            file_inode.data_ptrs[7] = new_dbl_block;
+
+            indir_block_t double_indirect_block;
+            memset(&double_indirect_block, 0, sizeof(indir_block_t));
+
+            new_block = (block_ptr_t)back_store_allocate(fs->bs);
+            printf("\nINDIR IN DBL BLOCK: ---> %zu\n", new_block);
+            if (new_block == 0) {
+                printf("\nfs_write error: Nooo room to add the indirect pointer block");
+                return 0;
+            }
+
+            double_indirect_block.block_ptrs[0] = new_block;
+
+            if (full_write(fs, (void *)&double_indirect_block, new_dbl_block) != true) {
+                printf("\nfs_write error: could not write indirect block to bs");
+                return 0;
+            }
+
+            indir_block_t indirect_block;
+            memset(&indirect_block, 0, sizeof(indir_block_t));
+
+            if (full_write(fs, (void *)&indirect_block, new_block) != true) {
+                printf("\nfs_write error: could not write indirect block to bs");
+                return 0;
+            }
+
+            if (write_inode(fs, (void *)&file_inode, fs->fd_table.fd_inode[fd]) != true) {
+                printf("\nfs_write error: Could not write inode to BS");
+                return 0;
+            }
+
+            new_block = 0;
+        } else {    
+            size_t double_indirect_index = (fd_pos_block-518)/(INDIRECT_TOTAL);
+            size_t indirect_index = (fd_pos_block-518) - (double_indirect_index*INDIRECT_TOTAL);
+
+            indir_block_t double_indirect_block;
+            if (full_read(fs, &double_indirect_block, file_inode.data_ptrs[7]) != true) {
+                printf("\nerror: could not read double indirect pointer");
+                return 0;
+            }
+
+            printf("\nDBL INDIR INDEX: %zu\nPTR: %zu", double_indirect_index, double_indirect_block.block_ptrs[double_indirect_index]);
+            if (double_indirect_block.block_ptrs[double_indirect_index] == 0) {
+                new_block = (block_ptr_t)back_store_allocate(fs->bs);
+                printf("\nINDIR IN DBL INDIR BLOCK: %zu", new_block);
+                if (new_block == 0) {
+                    printf("\nfs_write error: Nope room to add the indirect pointer block");
+                    return 0;
+                }
+
+                indir_block_t indirect_block;
+                memset(&indirect_block, 0, sizeof(indir_block_t));
+
+                if (full_write(fs, (void *)&indirect_block, new_block) != true) {
+                    printf("\nfs_write error: could not write indirect block to bs");
+                    return 0;
+                }
+
+                double_indirect_block.block_ptrs[double_indirect_index] = new_block;
+
+                if (full_write(fs, (void *)&double_indirect_block, file_inode.data_ptrs[7]) != true) {
+                    printf("\nfs_writeee error: could not write indirect block to bs");
+                    return 0;
+                }
+
+                if (write_inode(fs, (void *)&file_inode, fs->fd_table.fd_inode[fd]) != true) {
+                    printf("\nfs_write error: Could not write inode to BS");
+                    return 0;
+                }
+
+                new_block = 0;
+            } else {
+                indir_block_t indirect_block;
+                if (full_read(fs, &indirect_block, double_indirect_block.block_ptrs[double_indirect_index]) != true) {
+                    printf("\nerror: could not read indirect pointer");
+                    return 0;
+                }
+
+                new_block = indirect_block.block_ptrs[indirect_index];
+            }
+        }
+    } 
+    return new_block;
 }

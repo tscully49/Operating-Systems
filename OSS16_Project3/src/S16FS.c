@@ -289,6 +289,7 @@ int fs_close(S16FS_t *fs, int fd) {
 /// \return number of bytes written (< nbyte IFF out of space), < 0 on error
 ///
 ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
+	//printf("\nSTARTED\n");
     if (!fs || !src || nbyte > FILE_SIZE_MAX || fd >= DESCRIPTOR_MAX || fd < 0) {
         printf("\nBad Parameters for fs_write");
         return -1;
@@ -301,8 +302,17 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     	return -1;
     }
 
-    size_t num_blocks_to_write = nbyte / BLOCK_SIZE; // finds the number of blocks needed to write to the inode
-    if (nbyte % BLOCK_SIZE != 0) num_blocks_to_write++; // if not perfectly divisible, you will need an extra block
+    printf("\nNEW ONE: %zu", fs->fd_table.fd_pos[fd]);
+
+    size_t num_blocks_to_write;
+    if (fs->fd_table.fd_pos[fd]%BLOCK_SIZE != 0) {
+    	size_t temp_num = nbyte - (fs->fd_table.fd_pos[fd] - (fs->fd_table.fd_pos[fd]/BLOCK_SIZE));
+    	num_blocks_to_write = (temp_num / BLOCK_SIZE) + 1;
+    	if (temp_num % BLOCK_SIZE != 0) num_blocks_to_write++;
+    } else {
+    	num_blocks_to_write = nbyte / BLOCK_SIZE; // finds the number of blocks needed to write to the inode
+    	if (nbyte % BLOCK_SIZE != 0) num_blocks_to_write++; // if not perfectly divisible, you will need an extra block
+    }
 
     inode_t file_inode;
     if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
@@ -311,9 +321,8 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     }
 
     size_t fd_pos = fs->fd_table.fd_pos[fd]; // current 
+    //printf("\nGot to end of fs_Write and got %zu", fs->fd_table.fd_pos[fd]);
     size_t fd_pos_block = fd_pos/BLOCK_SIZE; // don't add 1 if not a clean division
-    bool start_of_block = fd_pos%BLOCK_SIZE == 0; 
-
     size_t blocks_written = 0;
     size_t bytes_written = 0;
 
@@ -323,162 +332,50 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     }
 
     // build dyn array of data blocks written to 
-    dyn_array_t *data_blocks_written_to = dyn_array_create(0,sizeof(block_ptr_t),NULL);
-
-    while (blocks_written < num_blocks_to_write) {
-    	if (fd_pos_block >= 262662) {
-    		printf("\nError with fs_write: Trying to extend file past the maximum file size");
-    		return -1;
-    	}
-
-   		if (blocks_written == 0 && start_of_block == false) {
-   			// read block # to local variable
-   			block_ptr_t new_block = file_inode.data_ptrs[fd_pos_block];
-   			// calculate offset
-   			size_t offset = fd_pos - (fd_pos_block*BLOCK_SIZE);
-   			size_t num_bytes = BLOCK_SIZE-offset;
-   			// write to block in bs (partial write???)
-   			if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-   			// add to dyn_array
-   			if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-
-   			bytes_written += num_bytes;
-   			// increment the void pointer only by however many bytes are used... 
-   			src = INCREMENT_VOID(src, num_bytes);
-   		} else if (blocks_written == 0 && start_of_block == true && nbyte <= BLOCK_SIZE) {
-   			// read block # to local variable
-   			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-   			// calculate offset
-   			size_t offset = 0;
-   			size_t num_bytes = nbyte;
-   			// write to block in bs (partial write???)
-   			if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-   			// add to dyn_array
-   			if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-
-   			bytes_written += num_bytes;
-   			// increment the void pointer only by however many bytes are used... 
-   			src = INCREMENT_VOID(src, num_bytes);
-   		} else if (blocks_written == 0 && start_of_block == true && nbyte > BLOCK_SIZE) {
-   			// read block # to local variable
-   			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-   			// write to block in bs (partial write???)
-   			if (full_write(fs, src, new_block) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-   			// add to dyn_array
-   			if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
-   				dyn_array_destroy(data_blocks_written_to);
-   				return -1;
-   			}
-
-   			bytes_written += BLOCK_SIZE;
-   			// increment the void pointer only by however many bytes are used... 
-   			src = INCREMENT_VOID(src, BLOCK_SIZE);
-   		} else {
-   			if (blocks_written == num_blocks_to_write-1 && (fd_pos + nbyte)%BLOCK_SIZE != 0) { // if the last block of data doesn't fill up the entire block
-   				// read block # to local variable
-	   			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-	   			// calculate offset
-	   			size_t offset = 0;
-	   			size_t num_bytes = (fd_pos + nbyte)-(BLOCK_SIZE*fd_pos_block);
-	   			// write to block in bs (partial write???)
-	   			if (partial_write(fs, src, new_block, offset, num_bytes) != true) {
-	   				dyn_array_destroy(data_blocks_written_to);
-	   				return -1;
-	   			}
-	   			// add to dyn_array
-	   			if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
-	   				dyn_array_destroy(data_blocks_written_to);
-	   				return -1;
-	   			}
-
-	   			bytes_written += num_bytes;
-	   			// increment the void pointer only by however many bytes are used... 
-	   			src = INCREMENT_VOID(src, num_bytes);
-   			} else {
-	   			// find new block and (allocate???) ir wait until adding to data_ptrs
-	   			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-	   			if (new_block == 0) {
-	   				dyn_array_destroy(data_blocks_written_to);
-	   				return -1;
-	   			}
-
-	   			// write to block (full write???)
-	   			if (full_write(fs, src, new_block) != true) {
-	   				dyn_array_destroy(data_blocks_written_to);
-	   				return -1;
-	   			}
-
-	   			// add to dyn_array
-	   			if (dyn_array_push_back(data_blocks_written_to, &new_block) != true) {
-	   				dyn_array_destroy(data_blocks_written_to);
-	   				return -1;
-	   			}
-
-	   			bytes_written += BLOCK_SIZE;
-	   			// Increment void pointer for src
-	   			src = INCREMENT_VOID(src, BLOCK_SIZE);
-	   		}
-   		}
-
-    	blocks_written++;
-    	fd_pos_block++;
+    dyn_array_t *data_blocks_written_to = build_data_ptrs_array(fs, num_blocks_to_write, src, fd, nbyte, &bytes_written, &blocks_written);
+    if (data_blocks_written_to == NULL) {
+    	printf("\nError with build_data_ptrs_array function");
+    	return -1;
     }
 
-    //printf("\n\nDatablocks written but not added to inode: %zu", blocks_written);
+    //printf("\nNEW BYTES WRITTEN: %zu", bytes_written);
 
+    //printf("\nBytes written but not added to inode: %zu\n", bytes_written);
 
-    fd_pos_block = fd_pos/BLOCK_SIZE; // reset variable so we know which block in the data_ptrs is being updated
     size_t total_blocks_in_file = fd_pos_block+blocks_written;
     // iterate through dyn_array and update the inode block pointers 
+
+    //printf("\nERROR CHECK, TOTAL: %zu, FD_POS_BLOCK: %zu\n", total_blocks_in_file, fd_pos_block);
+
+    if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
+    	printf("\nError with fs_write: Could not read inode of file from fd");
+    	return -1;
+    }
 
     while (fd_pos_block < total_blocks_in_file) {
     	block_ptr_t temp;
     	if (dyn_array_extract_front(data_blocks_written_to, &temp) != true) {
+    		printf("\nfs_write error: cannot extract from dyn_array");
     		dyn_array_destroy(data_blocks_written_to);
     		return -1;
     	} 
     	// allocate the data block in the FBM
     	if (fd_pos_block <= 5) { // direct pointers
        		file_inode.data_ptrs[fd_pos_block] = temp;
-    	} else if (fd_pos_block >= 6) { // indirect pointers
+    	} else if (fd_pos_block >= 6 && fd_pos_block < 518) { // indirect pointers
     		if (file_inode.data_ptrs[6] == 0) {
-    			// add the indirect block
-    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-    			if (new_block == 0) {
-    				printf("\nfs_write error: No room to add the indirect pointer block");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
-
-    			indir_block_t indirect_block;
-    			memset(&indirect_block, 0, sizeof(indir_block_t));
-
-    			indirect_block.block_ptrs[0] = temp;
-
-    			if (full_write(fs, (void *)&indirect_block, new_block) != true) {
-    				printf("\nfs_write error: could not write indirect block to bs");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
+    			printf("\nERROR INDIR DOESNT EXIST");
+    			dyn_array_destroy(data_blocks_written_to);
+    			return -1;
      		} else {
+     			printf("\nFOUND INDIR");
     			// go to block and add to it
     			indir_block_t indirect_block;
-    			full_read(fs, &indirect_block, file_inode.data_ptrs[6]);
+    			if (full_read(fs, &indirect_block, file_inode.data_ptrs[6]) != true) {
+    				printf("\nfs_write error: could not read indirectttt block from bs");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
+    			}
 
     			indirect_block.block_ptrs[fd_pos_block-6] = temp;
 
@@ -490,46 +387,16 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     		}
     	} else if (fd_pos_block >= 518) { // double indirect pointers
     		if (file_inode.data_ptrs[7] == 0) {
-    			// add the double indirect block
-    			block_ptr_t new_dbl_block = (block_ptr_t)back_store_allocate(fs->bs);
-    			if (new_dbl_block == 0) {
-    				printf("\nfs_write error: No room to add the double indirect pointer block");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
-
-    			indir_block_t double_indirect_block;
-    			memset(&double_indirect_block, 0, sizeof(indir_block_t));
-
-    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-    			if (new_block == 0) {
-    				printf("\nfs_write error: No room to add the indirect pointer block");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
-
-    			double_indirect_block.block_ptrs[0] = new_block;
-
-    			if (full_write(fs, (void *)&double_indirect_block, new_dbl_block) != true) {
-    				printf("\nfs_write error: could not write indirect block to bs");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
-
-    			indir_block_t indirect_block;
-    			memset(&indirect_block, 0, sizeof(indir_block_t));
-
-    			indirect_block.block_ptrs[0] = temp;
-
-    			if (full_write(fs, (void *)&indirect_block, new_dbl_block) != true) {
-    				printf("\nfs_write error: could not write indirect block to bs");
-    				dyn_array_destroy(data_blocks_written_to);
-    				return -1;
-    			}
+    			printf("\nERROR DBL INDIR DOESNT EXIST...");
+    			dyn_array_destroy(data_blocks_written_to);
+    			return -1;
     		} else {
+    			printf("\nCHECK DBL: %zu", file_inode.data_ptrs[7]);
+    			//printf("\nFOUND DBL INDIR");
     			// find which indirect pointer in the double indirect block we are going into
-    			size_t double_indirect_index = (fd_pos_block-518)/INDIRECT_TOTAL;
+    			size_t double_indirect_index = (fd_pos_block-518)/(INDIRECT_TOTAL);
 
+    			printf("\nCHECK DBL INDEX: %zu, %zu", double_indirect_index, fd_pos_block);
     			indir_block_t double_indirect_block;
     			if (full_read(fs, &double_indirect_block, file_inode.data_ptrs[7]) != true) {
     				printf("\nfs_write error: could not read double indirect pointer");
@@ -538,36 +405,13 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     			}
 
     			if (double_indirect_block.block_ptrs[double_indirect_index] == 0) { // if doesn't
-    				// create the indirect block and set the 0th element to the temp 
-    				// add the indirect block
-	    			block_ptr_t new_block = (block_ptr_t)back_store_allocate(fs->bs);
-	    			if (new_block == 0) {
-	    				printf("\nfs_write error: No room to add the indirect pointer block");
-	    				dyn_array_destroy(data_blocks_written_to);
-	    				return -1;
-	    			}
-
-	    			indir_block_t indirect_block;
-	    			memset(&indirect_block, 0, sizeof(indir_block_t));
-
-	    			indirect_block.block_ptrs[0] = temp;
-
-	    			if (full_write(fs, (void *)&indirect_block, new_block) != true) {
-	    				printf("\nfs_write error: could not write indirect block to bs");
-	    				dyn_array_destroy(data_blocks_written_to);
-	    				return -1;
-	    			}
-
-	    			double_indirect_block.block_ptrs[double_indirect_index] = new_block;
-
-	    			if (full_write(fs, (void *)&double_indirect_block, file_inode.data_ptrs[7]) != true) {
-	    				printf("\nfs_write error: could not write indirect block to bs");
-	    				dyn_array_destroy(data_blocks_written_to);
-	    				return -1;
-	    			}
+    				printf("\nERROR INDIR in DBL INDIR DOESNT EXIST...");
+    				dyn_array_destroy(data_blocks_written_to);
+    				return -1;
     			} else { // else 
+    				//printf("\nFOUND INDIR IN DBL INDIR");
     				// find which index in that indirect block you are using
-    				size_t indirect_index = fd_pos_block - double_indirect_index;
+    				size_t indirect_index = (fd_pos_block-518) - (double_indirect_index*INDIRECT_TOTAL);
     				// set that index = temp 
     				indir_block_t indirect_block;
     				if (full_read(fs, &indirect_block, double_indirect_block.block_ptrs[double_indirect_index]) != true) {
@@ -587,6 +431,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     		}
     	} else if (fd_pos_block >= 262662) {
     		printf("\nError with fs_write: Trying to extend file past the maximum file size");
+    		dyn_array_destroy(data_blocks_written_to);
     		return -1;
     	}
 
@@ -594,7 +439,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     }
 
     if (dyn_array_empty(data_blocks_written_to) != true) {
-    	printf("\nfs_write error: Dyn array not empty...");
+    	printf("\nfs_write error: Dyn array not empty...  %zu", dyn_array_size(data_blocks_written_to));
     	dyn_array_destroy(data_blocks_written_to);
     	return -1;
     }
@@ -603,14 +448,16 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
 
     // increase the size of the file and bump the size mdata of the file
     file_inode.mdata.size = fd_pos + nbyte;
+    fs->fd_table.fd_pos[fd] = fd_pos + bytes_written;
 
     // write inode to BS ---> write_inode();
-    if (write_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) != true) {
+    if (write_inode(fs, (void *)&file_inode, fs->fd_table.fd_inode[fd]) != true) {
     	printf("\nfs_write error: Could not write inode to BS");
     	return -1;
     }
 
-    //printf("\n\nGot to end of fs_Write and got %zu", bytes_written);
+    printf("\nGot to end of fs_Write and got %zu/%zu", fs->fd_table.fd_pos[fd], FILE_SIZE_MAX);
+    //printf("\nFINISHED\n");
     return bytes_written;
 }
 
