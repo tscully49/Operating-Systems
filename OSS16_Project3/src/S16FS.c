@@ -491,6 +491,7 @@ int fs_remove(S16FS_t *fs, const char *path) {
     			}
 
     			for (int i=0; i<DESCRIPTOR_MAX; i++) {
+    				if (bitmap_test(fs->fd_table.fd_status, i) == false) continue;
     				if (file_status.inode == fs->fd_table.fd_inode[i]) {
     					bitmap_reset(fs->fd_table.fd_status, i);
     					break;
@@ -506,6 +507,8 @@ int fs_remove(S16FS_t *fs, const char *path) {
 	    			}
     				back_store_release(fs->bs, temp);
     			}
+
+    			dyn_array_destroy(data_blocks_in_file);
 
     			// remove the inode from the parent directory
 				inode_t parent_inode;
