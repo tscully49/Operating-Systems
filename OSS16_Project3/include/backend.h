@@ -191,6 +191,6 @@ dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t 
 
 dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, const void *src, int fd, size_t nbyte, size_t *bytes_written, size_t *blocks_written);
 
-block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *data_blocks_written_to);
+block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd);
 
 #endif

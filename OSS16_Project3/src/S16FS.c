@@ -302,7 +302,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     	return -1;
     }
 
-    printf("\nNEW ONE: %zu", fs->fd_table.fd_pos[fd]);
+    //printf("\nNEW ONE: %zu", fs->fd_table.fd_pos[fd]);
 
     size_t num_blocks_to_write;
     if (fs->fd_table.fd_pos[fd]%BLOCK_SIZE != 0) {
@@ -349,6 +349,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
 
     if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
     	printf("\nError with fs_write: Could not read inode of file from fd");
+    	dyn_array_destroy(data_blocks_written_to);
     	return -1;
     }
 
@@ -368,7 +369,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     			dyn_array_destroy(data_blocks_written_to);
     			return -1;
      		} else {
-     			printf("\nFOUND INDIR");
+     			//printf("\nFOUND INDIR");
     			// go to block and add to it
     			indir_block_t indirect_block;
     			if (full_read(fs, &indirect_block, file_inode.data_ptrs[6]) != true) {
@@ -391,12 +392,12 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     			dyn_array_destroy(data_blocks_written_to);
     			return -1;
     		} else {
-    			printf("\nCHECK DBL: %zu", file_inode.data_ptrs[7]);
+    			//printf("\nCHECK DBL: %zu", file_inode.data_ptrs[7]);
     			//printf("\nFOUND DBL INDIR");
     			// find which indirect pointer in the double indirect block we are going into
     			size_t double_indirect_index = (fd_pos_block-518)/(INDIRECT_TOTAL);
 
-    			printf("\nCHECK DBL INDEX: %zu, %zu", double_indirect_index, fd_pos_block);
+    			//printf("\nCHECK DBL INDEX: %zu, %zu", double_indirect_index, fd_pos_block);
     			indir_block_t double_indirect_block;
     			if (full_read(fs, &double_indirect_block, file_inode.data_ptrs[7]) != true) {
     				printf("\nfs_write error: could not read double indirect pointer");
@@ -456,7 +457,7 @@ ssize_t fs_write(S16FS_t *fs, int fd, const void *src, size_t nbyte) {
     	return -1;
     }
 
-    printf("\nGot to end of fs_Write and got %zu/%zu", fs->fd_table.fd_pos[fd], FILE_SIZE_MAX);
+    //printf("\nGot to end of fs_Write and got %zu/%zu", fs->fd_table.fd_pos[fd], FILE_SIZE_MAX);
     //printf("\nFINISHED\n");
     return bytes_written;
 }
@@ -489,6 +490,13 @@ int fs_remove(S16FS_t *fs, const char *path) {
     				return -1;
     			}
 
+    			for (int i=0; i<DESCRIPTOR_MAX; i++) {
+    				if (file_status.inode == fs->fd_table.fd_inode[i]) {
+    					bitmap_reset(fs->fd_table.fd_status, i);
+    					break;
+    				}
+    			}
+
     			while (dyn_array_empty(data_blocks_in_file) == false) {
     				block_ptr_t temp;
     				if (dyn_array_extract_back(data_blocks_in_file, &temp) == false) {
@@ -498,11 +506,6 @@ int fs_remove(S16FS_t *fs, const char *path) {
 	    			}
     				back_store_release(fs->bs, temp);
     			}
-    			// change the filename to NULL or 0
-    			if (clear_inode(fs, file_status.inode) == false) {
-					printf("\nError in fs_remove: clear_inode function failec");
-					return -1;
-				}
 
     			// remove the inode from the parent directory
 				inode_t parent_inode;
@@ -526,6 +529,12 @@ int fs_remove(S16FS_t *fs, const char *path) {
 					printf("\nError with fs_remove: The directory to be deleted was not found in the parent dir");
 					return -1;
 				}
+
+				// change the filename to NULL or 0
+    			if (clear_inode(fs, file_status.inode) == false) {
+					printf("\nError in fs_remove: clear_inode function failec");
+					return -1;
+				}
 				// Write parent dir back to BS from memory
 				if (full_write(fs, (void *)&parent_dir, parent_inode.data_ptrs[0]) == true) {
     				// return 0
@@ -545,11 +554,6 @@ int fs_remove(S16FS_t *fs, const char *path) {
     			if (is_empty == true) {
     				// clear the block holding the dir_block 
     				back_store_release(fs->bs, file_status.block);
-    				// clear inode and write to BS
-    				if (clear_inode(fs, file_status.inode) == false) {
-    					printf("\nError in fs_remove: clear_inode function failec");
-    					return -1;
-    				}
     				// remove from parent directory 
     				inode_t parent_inode;
     				read_inode(fs, &parent_inode, file_status.parent);
@@ -572,6 +576,12 @@ int fs_remove(S16FS_t *fs, const char *path) {
     					printf("\nError with fs_remove: The directory to be deleted was not found in the parent dir");
     					return -1;
     				}
+
+    				// clear inode and write to BS
+    				if (clear_inode(fs, file_status.inode) == false) {
+    					printf("\nError in fs_remove: clear_inode function failec");
+    					return -1;
+    				}
     				// Write parent dir back to BS from memory
     				if (full_write(fs, (void *)&parent_dir, parent_inode.data_ptrs[0]) == true) {
 	    				// return 0
@@ -581,7 +591,9 @@ int fs_remove(S16FS_t *fs, const char *path) {
 	    				return -1;
 	    			}
     			} else { // else 
-    				printf("Error with fs_remove: The directory requested to be remove is not empty");
+    				printf("\nError with fs_remove: The directory requested to be remove is not empty");
+    				for (int i = 0; i < DIR_REC_MAX; ++i) {
+				    }
     				return -1;
     			}
     		} else {

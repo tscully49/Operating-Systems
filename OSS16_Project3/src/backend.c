@@ -400,11 +400,11 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
 
         if (*blocks_written == 0 && start_of_block == false) {
 
-            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd);
 
             if (new_block == 0) {
                 new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                printf("\nUH OH: ---> %zu\n", new_block);
+                //printf("\nUH OH: ---> %zu\n", new_block);
                 if (new_block == 0) {
                     printf("\nerror: NO ROOM to allocate new block");
                     return data_blocks_written_to;
@@ -433,11 +433,11 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
             src = INCREMENT_VOID(src, num_bytes);
         } else if (*blocks_written == 0 && start_of_block == true && nbyte < BLOCK_SIZE) {
             // read block # to local variable
-            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd);
 
             if (new_block == 0) {
                 new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                printf("\nUH OH: ---> %zu\n", new_block);
+                //printf("\nUH OH: ---> %zu\n", new_block);
                 if (new_block == 0) {
                     printf("\nerror: NO ROOM to allocate new block");
                     return data_blocks_written_to;
@@ -464,11 +464,11 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
             src = INCREMENT_VOID(src, num_bytes);
         } else if (*blocks_written == 0 && start_of_block == true && nbyte >= BLOCK_SIZE) {
             
-            block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+            block_ptr_t new_block = find_block(fs, fd_pos_block, fd);
 
             if (new_block == 0) {
                 new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                printf("\nUH OH: ---> %zu\n", new_block);
+                //printf("\nUH OH: ---> %zu\n", new_block);
                 if (new_block == 0) {
                     printf("\nerror: NO ROOM to allocate new block");
                     return data_blocks_written_to;
@@ -494,11 +494,11 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
         } else {
             if (*blocks_written == num_blocks_to_write-1 && (fd_pos + nbyte)%BLOCK_SIZE != 0) { // if the last block of data doesn't fill up the entire block
                
-                block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+                block_ptr_t new_block = find_block(fs, fd_pos_block, fd);
 
                 if (new_block == 0) {
                     new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                    printf("\nUH OH: ---> %zu\n", new_block);
+                    //printf("\nUH OH: ---> %zu\n", new_block);
                     if (new_block == 0) {
                         printf("\nerror: NO ROOM to allocate new block");
                         return data_blocks_written_to;
@@ -527,11 +527,11 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
             } else {
                 // find new block and (allocate???) ir wait until adding to data_ptrs
                 
-                block_ptr_t new_block = find_block(fs, fd_pos_block, fd, data_blocks_written_to);
+                block_ptr_t new_block = find_block(fs, fd_pos_block, fd);
 
                 if (new_block == 0) {
                     new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                    printf("\nUH OH: ---> %zu\n", new_block);
+                    //printf("\nUH OH: ---> %zu\n", new_block);
                     if (new_block == 0) {
                         printf("\nError in fs_Write: NO ROOM to allocate new block");
                         return data_blocks_written_to;
@@ -564,19 +564,18 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
         fd_pos_block++;
     }
     //printf("\nEND OF FUNCTION ---> BYTES: %u\n", *blocks_written);
-    printf("\nDONE");
+    //printf("\nDONE");
     return data_blocks_written_to;
 }
 
-block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *data_blocks_written_to) {
-    if (!data_blocks_written_to) return 0;
+block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd) {
     inode_t file_inode;
     if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
         printf("\nerror: Could not read inode of file from fd");
         return 0;
     }
 
-    printf("\nFD_POS: %zu", fd_pos_block);
+    //printf("\nFD_POS: %zu", fd_pos_block);
     block_ptr_t new_block = 0;
 
     if (fd_pos_block <= 5) { // direct pointers
@@ -584,7 +583,7 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *da
     } else if (fd_pos_block >= 6 && fd_pos_block < 518) {
         if (file_inode.data_ptrs[6] == 0) {
             new_block = (block_ptr_t)back_store_allocate(fs->bs);
-            printf("\nINDIR BLOCK: ---> %zu\n", new_block);
+            //printf("\nINDIR BLOCK: ---> %zu\n", new_block);
             if (new_block == 0) {
                 printf("\nfs_write error: Nope room to add the indirect pointer block");
                 return 0;
@@ -621,7 +620,7 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *da
                 printf("\nfs_write error: Noo room to add the double indirect pointer block");
                 return 0;
             }
-            printf("\nDBL INDIR BLOCK: ---> %zu\n", new_dbl_block);
+            //printf("\nDBL INDIR BLOCK: ---> %zu\n", new_dbl_block);
 
             file_inode.data_ptrs[7] = new_dbl_block;
 
@@ -629,7 +628,7 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *da
             memset(&double_indirect_block, 0, sizeof(indir_block_t));
 
             new_block = (block_ptr_t)back_store_allocate(fs->bs);
-            printf("\nINDIR IN DBL BLOCK: ---> %zu\n", new_block);
+            //printf("\nINDIR IN DBL BLOCK: ---> %zu\n", new_block);
             if (new_block == 0) {
                 printf("\nfs_write error: Nooo room to add the indirect pointer block");
                 return 0;
@@ -666,10 +665,10 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd, dyn_array_t *da
                 return 0;
             }
 
-            printf("\nDBL INDIR INDEX: %zu\nPTR: %zu", double_indirect_index, double_indirect_block.block_ptrs[double_indirect_index]);
+            //printf("\nDBL INDIR INDEX: %zu\nPTR: %zu", double_indirect_index, double_indirect_block.block_ptrs[double_indirect_index]);
             if (double_indirect_block.block_ptrs[double_indirect_index] == 0) {
                 new_block = (block_ptr_t)back_store_allocate(fs->bs);
-                printf("\nINDIR IN DBL INDIR BLOCK: %zu", new_block);
+                //printf("\nINDIR IN DBL INDIR BLOCK: %zu", new_block);
                 if (new_block == 0) {
                     printf("\nfs_write error: Nope room to add the indirect pointer block");
                     return 0;
