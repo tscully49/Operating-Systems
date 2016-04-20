@@ -625,7 +625,38 @@ int fs_remove(S16FS_t *fs, const char *path) {
 /// \param whence Position from which offset is applied
 /// \return offset from BOF, < 0 on error
 ///
-off_t fs_seek(S16FS_t *fs, int fd, off_t offset, seek_t whence);
+off_t fs_seek(S16FS_t *fs, int fd, off_t offset, seek_t whence) {
+    if (!fs || !fd || fd < 0 || fd > 255) return -1;
+
+    inode_t file;
+    if (read_inode(fs, &file, fs->fd_table.fd_inode[fd]) != true) {
+        printf("\nfs_seek error: could not read inode to check size");
+    }
+
+    if(!offset || offset < 0 || (uint32_t)offset > file.mdata.size ) return -1;
+
+    // FS_SEEK_SET, FS_SEEK_CUR, FS_SEEK_END
+    if (whence == FS_SEEK_SET) {
+        fs->fd_table.fd_pos[fd] = offset;
+        return offset;
+    } else if (whence == FS_SEEK_CUR) {
+        if ((fs->fd_table.fd_pos[fd]) + (uint32_t)offset > file.mdata.size) {
+            fs->fd_table.fd_pos[fd] = file.mdata.size;
+            return file.mdata.size;
+        } else {
+            fs->fd_table.fd_pos[fd] = (fs->fd_table.fd_pos[fd]) + offset;
+            return (fs->fd_table.fd_pos[fd]) + offset;
+        }
+    } else if (whence == FS_SEEK_END) {
+        fs->fd_table.fd_pos[fd] = file.mdata.size - offset;
+        return file.mdata.size - offset;
+    } else {
+        printf("\nInvalid whence variable");
+        return -1;
+    }
+
+    return -1;
+}
 
 ///
 /// Reads data from the file linked to the given descriptor
@@ -637,7 +668,32 @@ off_t fs_seek(S16FS_t *fs, int fd, off_t offset, seek_t whence);
 /// \param nbyte The number of bytes to read
 /// \return number of bytes read (< nbyte IFF read passes EOF), < 0 on error
 ///
-ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte);
+ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte) {
+    if (fs && dst && fd_valid(fs, fd)) {
+        if (nbyte != 0) {
+
+            inode_t file_inode;
+            
+            size_t *current_position = &fs->fd_table.fd_pos[fd];
+
+            if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd])) {
+                if ((current_position + nbyte) > (size_t *)file_inode.mdata.size) {
+                    if (nbyte) {
+                        ssize_t read = read_file(fs, &file_inode, fs->fd_table.fd_pos[fd], dst, nbyte);
+                        if (read > 0) {
+                            fs->fd_table.fd_pos[fd] += read;
+                        }
+                        return read;
+                    }
+                    return 0;
+                }
+            }
+        } else {
+            return 0;
+        }
+    }
+    return -1;
+}
 
 ///
 /// Populates a dyn_array with information about the files in a directory
@@ -646,7 +702,13 @@ ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte);
 /// \param path Absolute path to the directory to inspect
 /// \return dyn_array of file records, NULL on error
 ///
-dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path);
+dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path) {
+    if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL;
+
+
+
+    return NULL;
+}
 
 ///
 /// !!! Graduate Level/Undergrad Bonus !!!

@@ -708,3 +708,95 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd) {
     } 
     return new_block;
 }
+
+bool fd_valid(const S16FS_t *const fs, int fd) {
+    return fs && fd >= 0 && fd < DESCRIPTOR_MAX && bitmap_test(fs->fd_table.fd_status, fd);
+}
+
+ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *dst, size_t nbyte) {
+    // Only overwriting data, no need to mess with allocation.
+    if (fs && inode && dst) {
+        size_t first_block = position / BLOCK_SIZE;
+        size_t last_block  = (position + nbyte - 1) / BLOCK_SIZE;
+        // -1 becasue it'll go too for when it's on the boundary
+        dyn_array_t *block_list = get_blocks(fs, inode, first_block, last_block);
+        //data_block_t data_block;
+        ssize_t data_read = 0;
+        block_ptr_t working_block;
+        bool success = true;
+        if (block_list) {
+            // potentially write partial block
+            if ((success = dyn_array_extract_front(block_list, &working_block))) {
+                unsigned offset = position & (BLOCK_SIZE - 1);
+                unsigned length = (dyn_array_empty(block_list) ? nbyte : BLOCK_SIZE - offset);
+                if ((success = back_store_read(fs->bs, working_block, &dst))) {
+                    //memcpy(data_block + offset, data, length);
+                    //if ((success = back_store_write(fs->bs, working_block, &data_block))) {
+                        dst = INCREMENT_VOID(dst, length);
+                        data_read += length;
+                    //}
+                }
+            }
+            // loop the middle
+            while (success && dyn_array_size(block_list) > 1
+                   && (success = dyn_array_extract_front(block_list, &working_block))) {
+                if ((success = back_store_read(fs->bs, working_block, &dst))) {
+                    dst = INCREMENT_VOID(dst, BLOCK_SIZE);
+                    data_read += BLOCK_SIZE;
+                }
+            }
+            // potentially write partial block, but always at front of block
+            if (success && dyn_array_size(block_list) == 1
+                && (success = dyn_array_extract_front(block_list, &working_block))) {
+                unsigned length = (position + nbyte) & (BLOCK_SIZE - 1);
+                if (length == 0) {
+                    length = 1024;
+                }
+                // I find it funny that it's really hard to tell the difference when you need to
+                // write 1024 or 0
+                // Thankfully, you can't be here if you're done writing.
+                if ((success = back_store_read(fs->bs, working_block, &dst))) {
+                    //memcpy(data_block, dst, length);
+                    //if ((success = back_store_write(fs->bs, working_block, &data_block))) {
+                        dst = INCREMENT_VOID(dst, length);
+                        data_read += length;
+                    //}
+                }
+            }
+            dyn_array_destroy(block_list);
+            return data_read;
+        }
+    }
+    return -1;
+}
+
+dyn_array_t *get_blocks(const S16FS_t *fs, const inode_t *inode, const size_t first, const size_t last) {
+    if (inode && last < (DIRECT_TOTAL + INDIRECT_TOTAL + INDIRECT_TOTAL * INDIRECT_TOTAL)) {
+        dyn_array_t *results = dyn_array_create(last - first, sizeof(block_ptr_t), NULL);
+        size_t i             = first;
+        bool success         = true;
+        indir_block_t single_indir, dbl_indir;
+        for (; i < DIRECT_TOTAL && i <= last && success; ++i) {
+            success = dyn_array_push_back(results, &inode->data_ptrs[i]);
+        }
+        if (i <= last && i < (DIRECT_TOTAL + INDIRECT_TOTAL) && success
+            && (success = full_read(fs, &single_indir, inode->data_ptrs[6]))) {
+            for (size_t idx = (i - DIRECT_TOTAL); i < (DIRECT_TOTAL + INDIRECT_TOTAL) && i <= last && success;
+                 ++i, ++idx) {
+                success = dyn_array_push_back(results, single_indir.block_ptrs + idx);
+            }
+        }
+        if (i <= last && success && (success = full_read(fs, &dbl_indir, inode->data_ptrs[7]))) {
+            for (size_t dbl_idx = ((i - (DIRECT_TOTAL + INDIRECT_TOTAL)) / INDIRECT_TOTAL); i <= last && success;
+                 ++dbl_idx) {
+                success = full_read(fs, &single_indir, dbl_indir.block_ptrs[dbl_idx]);
+                for (size_t idx = ((i - (DIRECT_TOTAL + INDIRECT_TOTAL)) - (dbl_idx * INDIRECT_TOTAL));
+                     idx < INDIRECT_TOTAL && i <= last && success; ++i, ++idx) {
+                    success = dyn_array_push_back(results, single_indir.block_ptrs + idx);
+                }
+            }
+        }
+        return results;
+    }
+    return NULL;
+}

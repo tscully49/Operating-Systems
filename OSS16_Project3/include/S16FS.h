@@ -14,13 +14,6 @@ typedef enum { FS_REGULAR, FS_DIRECTORY } file_t;
 #define FS_FNAME_MAX (64)
 // INCLUDING null terminator
 
-typedef struct {
-    // You can add more if you want
-    // vvv just don't remove or rename these vvv
-    char name[FS_FNAME_MAX];
-    file_t type;
-} file_record_t;
-
 ///
 /// Formats (and mounts) an S16FS file for use
 /// \param fname The file to format

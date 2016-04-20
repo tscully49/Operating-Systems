@@ -137,7 +137,12 @@ struct S16FS {
 
 typedef struct { block_ptr_t block_ptrs[INDIRECT_TOTAL]; } indir_block_t;
 
-
+typedef struct {
+    // You can add more if you want
+    // vvv just don't remove or rename these vvv
+    char name[FS_FNAME_MAX];
+    file_t type;
+} file_record_t;
 
 // completely generic structure with a smattering of types
 // functions that use it say what they fill out
@@ -192,5 +197,9 @@ dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t 
 dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, const void *src, int fd, size_t nbyte, size_t *bytes_written, size_t *blocks_written);
 
 block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd);
+
+bool fd_valid(const S16FS_t *const fs, int fd);
+ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *dst, size_t nbyte);
+dyn_array_t *get_blocks(const S16FS_t *fs, const inode_t *inode, const size_t first, const size_t last);
 
 #endif
