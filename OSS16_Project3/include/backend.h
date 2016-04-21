@@ -155,8 +155,10 @@ typedef struct {
     void *data;
 } result_t;
 
+typedef enum { OVERWRITE = 0x01, EXTEND = 0x02, MIXED = 0x03 } write_mode_t;
+
 #define GET_WRITE_MODE(file_size, position, nbytes) \
-    (((position) < (file_size)) ? ((((positon) + (nbytes)) <= file_size) ? OVERWRITE : MIXED) : EXTEND)
+    (((position) < (file_size)) ? ((((position) + (nbytes)) <= file_size) ? OVERWRITE : MIXED) : EXTEND)
 
 #ifdef DEBUG
 
@@ -196,10 +198,14 @@ dyn_array_t* build_array_of_file_data_ptrs(const S16FS_t *const fs, inode_ptr_t 
 
 dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, const void *src, int fd, size_t nbyte, size_t *bytes_written, size_t *blocks_written);
 
+ssize_t overwrite_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *data, size_t nbyte);
+ssize_t extend_file(S16FS_t *fs, inode_t *inode, inode_ptr_t inode_number, size_t new_len);
+
+
 block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd);
 
 bool fd_valid(const S16FS_t *const fs, int fd);
-ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *dst, size_t nbyte);
+ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, void *dst, size_t nbyte);
 dyn_array_t *get_blocks(const S16FS_t *fs, const inode_t *inode, const size_t first, const size_t last);
 void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, result_t *res, char **fname);
 

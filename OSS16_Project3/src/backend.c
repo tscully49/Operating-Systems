@@ -568,6 +568,149 @@ dyn_array_t* build_data_ptrs_array(S16FS_t *fs, size_t num_blocks_to_write, cons
     return data_blocks_written_to;
 }
 
+ssize_t overwrite_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *data, size_t nbyte) {
+    // Only overwriting data, no need to mess with allocation.
+    if (fs && inode && data) {
+        size_t first_block = position / BLOCK_SIZE;
+        size_t last_block  = (position + nbyte - 1) / BLOCK_SIZE;
+        // -1 becasue it'll go too for when it's on the boundary
+        dyn_array_t *block_list = get_blocks(fs, inode, first_block, last_block);
+        data_block_t data_block;
+        ssize_t data_written = 0;
+        block_ptr_t working_block;
+        bool success = true;
+        if (block_list) {
+            // potentially write partial block
+            if ((success = dyn_array_extract_front(block_list, &working_block))) {
+                unsigned offset = position & (BLOCK_SIZE - 1);
+                unsigned length = (dyn_array_empty(block_list) ? nbyte : BLOCK_SIZE - offset);
+                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
+                    memcpy(data_block + offset, data, length);
+                    if ((success = back_store_write(fs->bs, working_block, &data_block))) {
+                        data = INCREMENT_VOID(data, length);
+                        data_written += length;
+                    }
+                }
+            }
+            // loop the middle
+            while (success && dyn_array_size(block_list) > 1
+                   && (success = dyn_array_extract_front(block_list, &working_block))) {
+                if ((success = back_store_write(fs->bs, working_block, data))) {
+                    data = INCREMENT_VOID(data, BLOCK_SIZE);
+                    data_written += BLOCK_SIZE;
+                }
+            }
+            // potentially write partial block, but always at front of block
+            if (success && dyn_array_size(block_list) == 1
+                && (success = dyn_array_extract_front(block_list, &working_block))) {
+                unsigned length = (position + nbyte) & (BLOCK_SIZE - 1);
+                if (length == 0) {
+                    length = 1024;
+                }
+                // I find it funny that it's really hard to tell the difference when you need to
+                // write 1024 or 0
+                // Thankfully, you can't be here if you're done writing.
+                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
+                    memcpy(data_block, data, length);
+                    if ((success = back_store_write(fs->bs, working_block, &data_block))) {
+                        data = INCREMENT_VOID(data, length);
+                        data_written += length;
+                    }
+                }
+            }
+            dyn_array_destroy(block_list);
+            return data_written;
+        }
+    }
+    return -1;
+}
+
+ssize_t extend_file(S16FS_t *fs, inode_t *inode, inode_ptr_t inode_number, size_t new_len) {
+    if (inode) {
+        uint32_t current_size      = inode->mdata.size;
+        size_t cur_block_total     = (current_size / BLOCK_SIZE) + (current_size & (BLOCK_SIZE - 1) ? 1 : 0);
+        size_t new_block_count     = (new_len / BLOCK_SIZE) + (new_len & (BLOCK_SIZE - 1) ? 1 : 0);
+        indir_block_t single_indir = {{0}}, double_indir = {{0}};
+        if (cur_block_total == new_block_count) {
+            // Just stop. Now. Please.
+            return 0;
+        }
+        bool success = true;
+        block_ptr_t new_block;
+        // direct
+        if (cur_block_total < DIRECT_TOTAL) {
+            for (; cur_block_total < DIRECT_TOTAL && success && cur_block_total < new_block_count;) {
+                new_block = back_store_allocate(fs->bs);
+                if ((success = new_block != 0)) {
+                    inode->data_ptrs[cur_block_total] = new_block;
+                    ++cur_block_total;
+                }
+            }
+        }
+        // indirect
+        if (success && cur_block_total < new_block_count && cur_block_total < (DIRECT_TOTAL + INDIRECT_TOTAL)) {
+            if (inode->data_ptrs[6] == 0) {
+                // need to allocate indirect
+                new_block = back_store_allocate(fs->bs);
+                if ((success = new_block != 0)) {
+                    inode->data_ptrs[6] = new_block;
+                }
+            } else {
+                success = back_store_read(fs->bs, inode->data_ptrs[6], &single_indir);
+            }
+            if (success) {
+                for (size_t i = cur_block_total - DIRECT_TOTAL;
+                     i < INDIRECT_TOTAL && success && cur_block_total < new_block_count; ++i) {
+                    new_block = back_store_allocate(fs->bs);
+                    if ((success = new_block != 0)) {
+                        single_indir.block_ptrs[i] = new_block;
+                        ++cur_block_total;
+                    }
+                }
+                // write indir back
+                success = back_store_write(fs->bs, inode->data_ptrs[6], &single_indir);
+            }
+        }
+        // dbl
+        if (success && cur_block_total < new_block_count) {
+            if (inode->data_ptrs[7] == 0) {
+                new_block = back_store_allocate(fs->bs);
+                if ((success = new_block != 0)) {
+                    inode->data_ptrs[7] = new_block;
+                }
+            } else {
+                success = back_store_read(fs->bs, inode->data_ptrs[7], &double_indir);
+            }
+            for (size_t dbl_idx = (cur_block_total - DIRECT_TOTAL - INDIRECT_TOTAL) / INDIRECT_TOTAL;
+                 cur_block_total < new_block_count && success && dbl_idx < INDIRECT_TOTAL; ++dbl_idx) {
+                if (double_indir.block_ptrs[dbl_idx] == 0) {
+                    new_block = back_store_allocate(fs->bs);
+                    if ((success = new_block != 0)) {
+                        double_indir.block_ptrs[dbl_idx] = new_block;
+                        memset(&single_indir, 0x00, sizeof(indir_block_t));
+                    }
+                } else {
+                    success = back_store_read(fs->bs, double_indir.block_ptrs[dbl_idx], &single_indir);
+                }
+                for (size_t idx = (cur_block_total - DIRECT_TOTAL - INDIRECT_TOTAL) & (INDIRECT_TOTAL - 1);
+                     cur_block_total < new_block_count && success && idx < INDIRECT_TOTAL; ++idx) {
+                    new_block = back_store_allocate(fs->bs);
+                    if ((success = new_block != 0)) {
+                        single_indir.block_ptrs[idx] = new_block;
+                        ++cur_block_total;
+                    }
+                }
+                success = back_store_write(fs->bs, double_indir.block_ptrs[dbl_idx], &single_indir);
+            }
+            success = back_store_write(fs->bs, inode->data_ptrs[7], &double_indir);
+        }
+        // flush inode and return
+        inode->mdata.size = (new_block_count == cur_block_total ? new_len : (cur_block_total * BLOCK_SIZE));
+        return write_inode(fs, inode, inode_number) ? inode->mdata.size : -1;
+    }
+    return -1;
+}
+
 block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd) {
     inode_t file_inode;
     if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd]) == false) {
@@ -713,14 +856,15 @@ bool fd_valid(const S16FS_t *const fs, int fd) {
     return fs && fd >= 0 && fd < DESCRIPTOR_MAX && bitmap_test(fs->fd_table.fd_status, fd);
 }
 
-ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *dst, size_t nbyte) {
+ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, void *dst, size_t nbyte) {
     // Only overwriting data, no need to mess with allocation.
     if (fs && inode && dst) {
         size_t first_block = position / BLOCK_SIZE;
         size_t last_block  = (position + nbyte - 1) / BLOCK_SIZE;
         // -1 becasue it'll go too for when it's on the boundary
         dyn_array_t *block_list = get_blocks(fs, inode, first_block, last_block);
-        //data_block_t data_block;
+        
+        data_block_t data_block;
         ssize_t data_read = 0;
         block_ptr_t working_block;
         bool success = true;
@@ -729,22 +873,24 @@ ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, cons
             if ((success = dyn_array_extract_front(block_list, &working_block))) {
                 unsigned offset = position & (BLOCK_SIZE - 1);
                 unsigned length = (dyn_array_empty(block_list) ? nbyte : BLOCK_SIZE - offset);
-                if ((success = back_store_read(fs->bs, working_block, &dst))) {
-                    //memcpy(data_block + offset, data, length);
-                    //if ((success = back_store_write(fs->bs, working_block, &data_block))) {
-                        dst = INCREMENT_VOID(dst, length);
-                        data_read += length;
-                    //}
+                printf("\nOFFSET: %d\nLENGTH: %d\n\n\n", offset, length);
+                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
+                    dst = INCREMENT_VOID(dst, offset);
+                    memcpy(dst, &data_block, length);
+                    dst = INCREMENT_VOID(dst, length);
+                    data_read += length;
                 }
             }
             // loop the middle
             while (success && dyn_array_size(block_list) > 1
                    && (success = dyn_array_extract_front(block_list, &working_block))) {
-                if ((success = back_store_read(fs->bs, working_block, &dst))) {
+                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
                     dst = INCREMENT_VOID(dst, BLOCK_SIZE);
                     data_read += BLOCK_SIZE;
                 }
+                //printf("\n\nSIZE: %d\n\n", dyn_array_size(block_list));
             }
+            //printf("Made it through the middle blocks\n");
             // potentially write partial block, but always at front of block
             if (success && dyn_array_size(block_list) == 1
                 && (success = dyn_array_extract_front(block_list, &working_block))) {
@@ -755,18 +901,20 @@ ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, cons
                 // I find it funny that it's really hard to tell the difference when you need to
                 // write 1024 or 0
                 // Thankfully, you can't be here if you're done writing.
-                if ((success = back_store_read(fs->bs, working_block, &dst))) {
-                    //memcpy(data_block, dst, length);
-                    //if ((success = back_store_write(fs->bs, working_block, &data_block))) {
-                        dst = INCREMENT_VOID(dst, length);
-                        data_read += length;
-                    //}
+                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
+                    memcpy(dst, &data_block, length);
+                    dst = INCREMENT_VOID(dst, length);
+                    data_read += length;
                 }
             }
+            printf("\nDONE WITH READ_FILE: %d\n\n", data_read);
             dyn_array_destroy(block_list);
-            return data_read;
+            ssize_t value = data_read;
+            return value;
+            //printf("\nGet here???\n\n");
         }
     }
+    printf("\nread_file error: bad parameters");
     return -1;
 }
 
