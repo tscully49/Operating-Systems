@@ -705,7 +705,62 @@ ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte) {
 dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path) {
     if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL;
 
+    result_t file_status;
+    locate_file(fs, path, &file_status);
+    
+    if (file_status.success && !file_status.found) {
+            
+        if (file_status.type == FS_DIRECTORY) {
+            inode_t file_inode;
+            if (read_inode(fs, &file_inode, file_status.inode)) {
+                dir_block_t directory;
 
+                if (back_store_read(fs->bs, file_status.block, &directory) ) {
+
+                    dyn_array_t *directory_entries = dyn_array_create(0,sizeof(file_record_t),NULL);
+
+                    for (int i=0; i<DIR_REC_MAX; ++i) {
+                        if (directory.entries[i].fname[0] == '\0') {
+                            continue;
+                        }
+
+                        inode_t temp_inode;
+                        if (read_inode(fs, &temp_inode, directory.entries[i].inode)) {
+                            file_record_t temp;
+                            strcpy(temp.name, directory.entries[i].fname); // Copies the name over
+
+                            if (temp_inode.mdata.type == 0) {
+                                temp.type = FS_REGULAR;
+                            } else {
+                                temp.type = FS_DIRECTORY;
+                            }
+
+                            if (dyn_array_push_back(directory_entries, (void *)&(temp))) {
+                                continue;
+                            } else {
+                                printf("\nget_dir error: could not push file_record to back of dyn_array");
+                                dyn_array_destroy(directory_entries);
+                                return NULL;
+                            }
+                        } else {
+                            printf("\nget_dir error: could not read the inode for the file to put into file_record");
+                            dyn_array_destroy(directory_entries);
+                            return NULL;
+                        }
+                    }
+                    return directory_entries;
+                } else {
+                    printf("\nget_dir error: could not read the block which holds the directory data");
+                }
+            } else {
+                printf("\nget_dir error: could not read the inode of the results_t struct");
+            }
+        } else {
+            printf("\nfile found from locate_file is not a DIR");
+        }
+    } else {
+        printf("\nget_dir error: FILE NOT FOUND from locate_file");
+    }
 
     return NULL;
 }
@@ -721,4 +776,56 @@ dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path) {
 /// \param dst Absolute path to move the file to
 /// \return 0 on success, < 0 on error
 ///
-int fs_move(S16FS_t *fs, const char *src, const char *dst);
+int fs_move(S16FS_t *fs, const char *src, const char *dst) {
+    if (!fs || !src || !dst) return -1;
+
+    result_t file_status;
+    locate_file(fs, src, &file_status);
+
+    if (file_status.success && file_status.found) {
+        inode_t inode;
+        if (read_inode(fs, &inode, file_status.inode)) {
+            inode_t parent_inode;
+            if (read_inode(fs, &parent_inode, file_status.parent)) {
+                dir_block_t directory;
+                if (back_store_read(fs->bs, parent_inode.data_ptrs[0], &directory) ) {
+                    for (int i=0; i<DIR_REC_MAX; ++i) {
+                        if (directory.entries[i].fname[0] == '\0') {
+                            continue;
+                        }
+
+                        if (strcmp(directory.entries[i].fname, inode.fname) == 0) {
+                            directory.entries[i].fname[0] = '\0';
+                            directory.entries[i].inode = 0;
+
+                            char *fname;
+                            result_t parent_dir_of_move;
+                            get_parent_dir_of_move_file(fs, dst, &parent_dir_of_move, &fname);
+
+                            if(parent_dir_of_move.success && parent_dir_of_move.found) {
+                                strcpy(inode.fname, fname);
+
+                                inode_t move_inode_parent;
+                                if (read_inode(fs, &move_inode_parent, parent_dir_of_move.inode)) {
+                                    dir_block_t move_dir_block;
+                                    if (back_store_read(fs->bs, move_inode_parent.data_ptrs[0], &move_dir_block)) {
+                                        for (int j=0; j<DIR_REC_MAX; ++j) {
+                                            if (move_dir_block.entries[j].fname[0] == '\0') {
+                                                strcpy(move_dir_block.entries[j].fname, fname);
+                                                move_dir_block.entries[j].inode = file_status.inode;
+                                                return 0;
+                                            }
+                                        }
+                                        return -1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return -1;
+}

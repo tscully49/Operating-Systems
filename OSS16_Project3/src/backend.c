@@ -800,3 +800,65 @@ dyn_array_t *get_blocks(const S16FS_t *fs, const inode_t *inode, const size_t fi
     }
     return NULL;
 }
+
+void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, result_t *res, char **fname) {
+    if (res) {
+        memset(res, 0x00, sizeof(result_t));  // IMMEDIATELY blank it
+        if (fs && abs_path) {
+            // need to get the token processing loop started (oh boy!)
+            const size_t path_len = strnlen(abs_path, FS_PATH_MAX);
+            if (path_len != 0 && abs_path[0] == '/' && path_len < FS_PATH_MAX) {
+                // ok, path is something we should at least bother trying to look at
+                char *path_copy = strndup(abs_path, path_len);
+                if (path_copy) {
+                    result_t scan_results = {true, true, false, 0, 0, 0, 0, 0, NULL};  // hey, cool, I found root!
+                    const char *delims    = "/";
+                    res->success          = true;
+                    res->found            = true;  // I'm going to assume it all works out, don't go making me a liar
+                    res->inode            = 0;
+                    res->block            = ROOT_DIR_BLOCK;
+                    res->type             = FS_DIRECTORY;
+                    res->data             = (void *) abs_path;
+                    char *token           = strtok(path_copy, delims);
+                    // Hardcoding results for root in case there aren't any tokens (path was "/")
+
+                    while (token) {
+                        // update the dir pointer
+                        res->data = (void *) (abs_path + (token - path_copy));
+
+                        // Cool. Does the next token exist in the current directory?
+                        scan_directory(fs, token, scan_results.inode, &scan_results);
+
+                        if (scan_results.success && scan_results.found) {
+                            // Good. It existed. Cycle.
+                            res->parent = scan_results.parent;
+                            res->inode  = scan_results.inode;
+                            token       = strtok(NULL, delims);
+                            continue;
+                        } else {
+                            const size_t fname_len = strnlen(abs_path, FS_PATH_MAX);
+                            if (fname_len < FS_PATH_MAX) {
+                                strcpy(*fname, token);
+
+                                printf("\nTEST FNAME: %s", *fname);
+                                token = strtok(NULL, delims);
+                                if (!token) {
+                                    res->success = true;
+                                    res->found = true;
+                                } else {
+                                    res->success = false;
+                                    res->found = false;
+                                }
+                                free(path_copy);
+                                return;
+                            }
+                        }
+                    }
+                    res->success = false;
+                    res->found = false;
+                    free(path_copy);
+                }
+            }
+        }
+    }
+}

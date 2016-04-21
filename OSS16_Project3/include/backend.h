@@ -201,5 +201,6 @@ block_ptr_t find_block(S16FS_t *fs, size_t fd_pos_block, int fd);
 bool fd_valid(const S16FS_t *const fs, int fd);
 ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, const void *dst, size_t nbyte);
 dyn_array_t *get_blocks(const S16FS_t *fs, const inode_t *inode, const size_t first, const size_t last);
+void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, result_t *res, char **fname);
 
 #endif
