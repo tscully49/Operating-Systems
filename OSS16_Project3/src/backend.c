@@ -875,8 +875,7 @@ ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, void
                 unsigned length = (dyn_array_empty(block_list) ? nbyte : BLOCK_SIZE - offset);
                 printf("\nOFFSET: %d\nLENGTH: %d\n\n\n", offset, length);
                 if ((success = back_store_read(fs->bs, working_block, &data_block))) {
-                    dst = INCREMENT_VOID(dst, offset);
-                    memcpy(dst, &data_block, length);
+                    memcpy(dst, data_block + offset, length);
                     dst = INCREMENT_VOID(dst, length);
                     data_read += length;
                 }
@@ -884,7 +883,7 @@ ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, void
             // loop the middle
             while (success && dyn_array_size(block_list) > 1
                    && (success = dyn_array_extract_front(block_list, &working_block))) {
-                if ((success = back_store_read(fs->bs, working_block, &data_block))) {
+                if ((success = back_store_read(fs->bs, working_block, dst))) {
                     dst = INCREMENT_VOID(dst, BLOCK_SIZE);
                     data_read += BLOCK_SIZE;
                 }
@@ -907,11 +906,10 @@ ssize_t read_file(S16FS_t *fs, const inode_t *inode, const size_t position, void
                     data_read += length;
                 }
             }
-            printf("\nDONE WITH READ_FILE: %d\n\n", data_read);
+            printf("\nDONE WITH READ_FILE: %d", data_read);
             dyn_array_destroy(block_list);
             ssize_t value = data_read;
             return value;
-            //printf("\nGet here???\n\n");
         }
     }
     printf("\nread_file error: bad parameters");

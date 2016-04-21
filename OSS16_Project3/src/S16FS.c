@@ -545,7 +545,10 @@ off_t fs_seek(S16FS_t *fs, int fd, off_t offset, seek_t whence) {
             }
         }
     } else if (whence == FS_SEEK_END) {
-        if (offset < 0) return file.mdata.size;
+        if (offset < 0) {
+            fs->fd_table.fd_pos[fd] = file.mdata.size + offset;
+            return file.mdata.size + offset;
+        }
 
         if(offset > (off_t)file.mdata.size ) {
             fs->fd_table.fd_pos[fd] = 0;
@@ -580,13 +583,12 @@ ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte) {
             if (read_inode(fs, &file_inode, fs->fd_table.fd_inode[fd])) {
                 if ((current_position + nbyte) > (size_t *)file_inode.mdata.size) {
                     if (nbyte) {
-                        printf("\nstarting read_file");
+                        printf("\nSTARTING POS: %d\nSIZE: %d", fs->fd_table.fd_pos[fd], file_inode.mdata.size);
                         ssize_t read = read_file(fs, &file_inode, fs->fd_table.fd_pos[fd], dst, nbyte);
-                        printf("\n\nWE MADE IT: %d\n\n", read);
-                        printf("\n\nfjdajflsaj\n\n");
                         if (read > 0) {
                             fs->fd_table.fd_pos[fd] += read;
                         }
+                        printf("\nNEW POS: %d", fs->fd_table.fd_pos[fd]);
                         return read;
                     }
                     return 0;
