@@ -261,19 +261,27 @@ int fs_open(S16FS_t *fs, const char *path) {
 /// \return 0 on success, < 0 on failure
 ///
 int fs_close(S16FS_t *fs, int fd) {
-    if (!fs || fd < 0) {
-        printf("\nBad Parameters for fs_close");
-        return -1;
-    }
+    if (fs && fd < DESCRIPTOR_MAX && fd >= 0) {
+        // Oh man, now I feel bad.
+        // There's 0% chance bitmap will detect out of bounds and stop
+        // So everyone's going to segfault if they don't range check the fd first.
+        // Because in the C++ version, I could just throw.
+        // Maybe I should just replace bitmap with the C++ version
+        // and expose a C interface that just throws. ...not that it's really better
+        // At least you'll see bitmap throwing as opposed to segfault (core dumped)
+        // That's unfortunate.
 
-    if (bitmap_test(fs->fd_table.fd_status, fd) == false) {
-    	printf("\nfs_close Error: Cannot close that fd, the fd is not currently in use");
-    	return -1;
-    } else {
-    	bitmap_reset(fs->fd_table.fd_status, fd);
-		return 0;
-    }
+        // I'm going to get so many emails.
+        // if (bitmap_test(fs->fd_table.fd_status,fd)) {
+        // Actually, I can just reset it. If it's not set, unsetting it doesn't do anything.
+        // Bits, man.
 
+        // But actually it fails the test since I say it was ok
+        if (bitmap_test(fs->fd_table.fd_status, fd)) {
+            bitmap_reset(fs->fd_table.fd_status, fd);
+            return 0;
+        }
+    }
     return -1;
 }
 
@@ -610,7 +618,7 @@ ssize_t fs_read(S16FS_t *fs, int fd, void *dst, size_t nbyte) {
 ///
 dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path) {
     if (!fs || !path || strcmp(path, "") == 0 || strcmp(path, "\n") == 0) return NULL;
-
+    printf("\nNEW GET DIR\n\n");
     result_t file_status;
     locate_file(fs, path, &file_status);
     
@@ -642,6 +650,7 @@ dyn_array_t *fs_get_dir(S16FS_t *fs, const char *path) {
                             }
 
                             if (dyn_array_push_back(directory_entries, (void *)&(temp))) {
+                                printf("\nDIR NAME: %s", temp.name);
                                 continue;
                             } else {
                                 printf("\nget_dir error: could not push file_record to back of dyn_array");
@@ -691,6 +700,7 @@ int fs_move(S16FS_t *fs, const char *src, const char *dst) {
     if (file_status.success && file_status.found) {
         inode_t inode;
         if (read_inode(fs, &inode, file_status.inode)) {
+            printf("\nTHI THIS THIS: %s", inode.fname);
             inode_t parent_inode;
             if (read_inode(fs, &parent_inode, file_status.parent)) {
                 dir_block_t directory;
@@ -704,24 +714,37 @@ int fs_move(S16FS_t *fs, const char *src, const char *dst) {
                             directory.entries[i].fname[0] = '\0';
                             directory.entries[i].inode = 0;
 
-                            char *fname;
+                            char *fname = (char *)malloc(64 * sizeof(char));
                             result_t parent_dir_of_move;
                             get_parent_dir_of_move_file(fs, dst, &parent_dir_of_move, &fname);
-
+                            printf("\nHERE TOOOOOO: %s \n\n", fname);
                             if(parent_dir_of_move.success && parent_dir_of_move.found) {
-                                strcpy(inode.fname, fname);
 
                                 inode_t move_inode_parent;
                                 if (read_inode(fs, &move_inode_parent, parent_dir_of_move.inode)) {
                                     dir_block_t move_dir_block;
+                                    printf("INODE PARENT NAME: %s\n%s\n", move_inode_parent.fname, inode.fname);
+                                    if (strcmp(move_inode_parent.fname, inode.fname) == 0) {
+                                        free(fname);
+                                        return -1;
+                                    }
+                                    strcpy(inode.fname, fname);
                                     if (back_store_read(fs->bs, move_inode_parent.data_ptrs[0], &move_dir_block)) {
                                         for (int j=0; j<DIR_REC_MAX; ++j) {
                                             if (move_dir_block.entries[j].fname[0] == '\0') {
                                                 strcpy(move_dir_block.entries[j].fname, fname);
                                                 move_dir_block.entries[j].inode = file_status.inode;
-                                                return 0;
+                                                if (back_store_write(fs->bs, move_inode_parent.data_ptrs[0], &move_dir_block)) {
+                                                    if (write_inode(fs, &move_inode_parent, parent_dir_of_move.inode)) {
+                                                        if (back_store_write(fs->bs, parent_inode.data_ptrs[0], &directory)) {
+                                                            free(fname);
+                                                            return 0;
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
+                                        free(fname);
                                         return -1;
                                     }
                                 }

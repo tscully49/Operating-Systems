@@ -18,7 +18,7 @@ include_directories(${GTEST_INCLUDE_DIRS} include)
 
 # add -DENABLE_MOVE to the CXX flags to activate move tests
 set(SHARED_FLAGS " -Wall -Wextra -Wshadow -g -D_POSIX_C_SOURCE=200809L ")
-set(CMAKE_CXX_FLAGS " -std=c++11 ${SHARED_FLAGS} ")
+set(CMAKE_CXX_FLAGS " -std=c++11 ${SHARED_FLAGS} -DENABLE_MOVE ")
 set(CMAKE_C_FLAGS " -std=c99 ${SHARED_FLAGS} ")
 
 add_executable(fs_test test/tests.cpp)

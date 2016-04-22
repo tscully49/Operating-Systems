@@ -951,6 +951,7 @@ void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, 
     if (res) {
         memset(res, 0x00, sizeof(result_t));  // IMMEDIATELY blank it
         if (fs && abs_path) {
+            printf("\nPATH: %s", abs_path);
             // need to get the token processing loop started (oh boy!)
             const size_t path_len = strnlen(abs_path, FS_PATH_MAX);
             if (path_len != 0 && abs_path[0] == '/' && path_len < FS_PATH_MAX) {
@@ -969,12 +970,14 @@ void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, 
                     // Hardcoding results for root in case there aren't any tokens (path was "/")
 
                     while (token) {
+                        printf("\nHI: %s\n", token);
                         // update the dir pointer
                         res->data = (void *) (abs_path + (token - path_copy));
 
                         // Cool. Does the next token exist in the current directory?
                         scan_directory(fs, token, scan_results.inode, &scan_results);
 
+                        printf("\nHERE\n\n");
                         if (scan_results.success && scan_results.found) {
                             // Good. It existed. Cycle.
                             res->parent = scan_results.parent;
@@ -982,11 +985,14 @@ void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, 
                             token       = strtok(NULL, delims);
                             continue;
                         } else {
-                            const size_t fname_len = strnlen(abs_path, FS_PATH_MAX);
+                            printf("\nENTERED\n\n");
+                            const size_t fname_len = strnlen(token, FS_PATH_MAX);
+                            printf("\nFNAME LEN: %zu\n\n", fname_len);
                             if (fname_len < FS_PATH_MAX) {
                                 strcpy(*fname, token);
 
-                                printf("\nTEST FNAME: %s", *fname);
+                                printf("\nHIIIII\n\n");
+                                printf("\nTEST FNAME: %s\n", *fname);
                                 token = strtok(NULL, delims);
                                 if (!token) {
                                     res->success = true;
@@ -998,6 +1004,7 @@ void get_parent_dir_of_move_file(const S16FS_t *const fs, const char *abs_path, 
                                 free(path_copy);
                                 return;
                             }
+                            printf("\nUH OH\n\n");
                         }
                     }
                     res->success = false;
