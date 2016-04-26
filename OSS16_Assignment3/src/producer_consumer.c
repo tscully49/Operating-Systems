@@ -5,7 +5,7 @@
 #include <time.h>
 
 #define DATA_SIZE 256
-#define BUFF_SIZE 4098
+#define BUFF_SIZE 4096
 
 
 int main(void) {
@@ -26,9 +26,9 @@ int main(void) {
     const key_t s_shm_key = 1338;  // used to create shared memory ipc
     const key_t s_sem_key = 1339;  // used to create semaphore ipc
     // POSIX IPC keys for you to use
-    const char *const p_msq_key = "OS_MSG";
-    const char *const p_shm_key = "OS_SHM";
-    const char *const p_sem_key = "OS_SEM";
+    const char *const p_msq_key = "/OS_MSG";
+    const char *const p_shm_key = "/OS_SHM";
+    const char *const p_sem_key = "/OS_SEM";
 
     /*
     * MESSAGE QUEUE SECTION
