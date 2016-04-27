@@ -38,7 +38,6 @@ int main(void) {
     /*
     * MESSAGE QUEUE SECTION
     **/
-    mq_unlink(p_msq_key);
 
     unsigned int msgprio = 1;
     char consumer_msg_queue[BUFF_SIZE] = {0};
@@ -131,7 +130,7 @@ int main(void) {
     /*
     * PIPE SECTION
     **/
-    
+
 
     /*
     * SHARED MEMORY AND SEMAPHORE SECTION
