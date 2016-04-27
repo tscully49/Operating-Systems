@@ -31,28 +31,29 @@ int main(void) {
     const key_t s_sem_key = 1339;*/ // used to create semaphore ipc
     
     // POSIX IPC keys for you to use
-    const char *const p_msq_key = "OS_MSG";
-    /*const char *const p_shm_key = "OS_SHM";
-    const char *const p_sem_key = "OS_SEM";*/
+    const char *const p_msq_key = "/OS_MSG";
+    /*const char *const p_shm_key = "/OS_SHM";
+    const char *const p_sem_key = "/OS_SEM";*/
 
     /*
     * MESSAGE QUEUE SECTION
     **/
+    mq_unlink(p_msq_key);
 
-    unsigned int msgprio = 0;
-    time_t currtime;
-    //pid_t my_pid = getpid();
-    char msgcontent[DATA_SIZE];
-    char writecontent[DATA_SIZE];
+    unsigned int msgprio = 1;
     char consumer_msg_queue[BUFF_SIZE] = {0};
+    //char empty_string[DATA_SIZE] = {0};
     int num_read;
-    unsigned int sender;
+    struct mq_attr msgq_attr;
 
-    int msg_queue_id = mq_open(p_msq_key, O_RDWR | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG, NULL);
-    if (msg_queue_id == -1) {
+    mqd_t msg_queue_id = mq_open(p_msq_key, O_RDWR | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG, NULL);
+    if (msg_queue_id == (mqd_t)-1) {
         perror("In mq_open()");
         exit(1);
     }
+
+    mq_getattr(msg_queue_id, &msgq_attr);
+    printf("Queue \"%s\":\n\t- stores at most %ld messages\n\t- large at most %ld bytes each\n\t- currently holds %ld messages\n", p_msq_key, msgq_attr.mq_maxmsg, msgq_attr.mq_msgsize, msgq_attr.mq_curmsgs);
 
     switch(pid = fork()) {
         case -1:
@@ -60,48 +61,77 @@ int main(void) {
 
         case 0: // child
             for (int i=0; i<BUFF_SIZE; i+=DATA_SIZE) {
-                currtime = time(NULL);
-                num_read = mq_receive(msg_queue_id, msgcontent, DATA_SIZE, &sender);
+                char msgcontent[10000] = {0};
+                mq_getattr(msg_queue_id, &msgq_attr);
+                while (msgq_attr.mq_curmsgs == 0) {
+                    sleep(1);
+                    mq_getattr(msg_queue_id, &msgq_attr);
+                }
+
+                num_read = mq_receive(msg_queue_id, msgcontent, 10000, NULL);
+                mq_getattr(msg_queue_id, &msgq_attr);
                 if (num_read == -1) {
                     perror("In mq_receive()");
                     exit(1);
                 }
-                memcpy(&consumer_msg_queue[i], msgcontent, DATA_SIZE);
-                //printf("\nReading from process %u (at %s).", pid, ctime(&currtime));
-                printf("\nREAD: %s\n", msgcontent);
+                printf("\ni: %d\n", i);
+
+                memcpy(consumer_msg_queue + i, msgcontent, DATA_SIZE);
             }
+
+            printf("\n\nGOT HERE\n\n");
+            for (int i=0; i<BUFF_SIZE; ++i) {
+                if (memcmp(&producer_buffer[i], &consumer_msg_queue[i], sizeof(char)) != 0) {
+                    printf("\nBuffers DO NOT match... at index: %d\n\nInput: %c\nOutput: %c\n", i, producer_buffer[i], consumer_msg_queue[i]);
+                    if (producer_buffer[i] == 0) {
+                        printf("\nPRODUCER is \\0\n");
+                    } else if (consumer_msg_queue[i] == 0) {
+                        printf("\nCONSUMER is \\0\n");
+                    }
+                    mq_unlink(p_msq_key);
+                    mq_close(msg_queue_id);
+                    exit(1);
+                }
+            }
+            printf("\nBuffers DO match!\n");
+            mq_unlink(p_msq_key);
+            mq_close(msg_queue_id);
+
             _exit(EXIT_SUCCESS);
             
         default: // parent 
             for (int i=0; i<BUFF_SIZE; i+=DATA_SIZE) {
-                currtime = time(NULL);
-                strncpy(writecontent, &producer_buffer[i], DATA_SIZE);
-                if (mq_send(msg_queue_id, writecontent, strlen(writecontent)+1, msgprio) == -1)
+                char writecontent[DATA_SIZE] = {0};
+                mq_getattr(msg_queue_id, &msgq_attr);
+                while (msgq_attr.mq_curmsgs == 10) {
+                    sleep(1);
+                    mq_getattr(msg_queue_id, &msgq_attr);
+                }
+                memcpy(writecontent, producer_buffer + i, DATA_SIZE);
+                printf("\n\nLEN: %d", sizeof(writecontent));
+
+                if (mq_send(msg_queue_id, writecontent, sizeof(writecontent), msgprio) == -1)
                 {
                     perror("msgsnd error");
                     fprintf(stderr,"msgsnd failed ");
                     exit(EXIT_FAILURE);
                 }
-                //printf("\nHello from process %u (at %s).", my_pid, ctime(&currtime));
-                printf("\nWRITE: %s\n", writecontent);
+                mq_getattr(msg_queue_id, &msgq_attr);
+                printf("\nADD: %ld\n", msgq_attr.mq_curmsgs);
             }
+
             w = waitpid(pid, NULL, 0);
+            printf("\nDONE\n");
             if (w == -1) { perror("waitpid"); exit(EXIT_FAILURE); }
     }
 
-    /////////////////////////////////////////////////////// CLOSE THE MSG QUEUE
-
-    for (int i=0; i<BUFF_SIZE; i+=DATA_SIZE) {
-        if (memcmp(&(ground_truth) + i, &(consumer_msg_queue) + i, DATA_SIZE) != 0) {
-            printf("\nBuffers DO NOT match... at index: %d\n", i);
-            exit(1);
-        }
-    }
-    printf("\nBuffers DO match!");
+    mq_unlink(p_msq_key);
+    mq_close(msg_queue_id);
 
     /*
     * PIPE SECTION
     **/
+    
 
     /*
     * SHARED MEMORY AND SEMAPHORE SECTION
